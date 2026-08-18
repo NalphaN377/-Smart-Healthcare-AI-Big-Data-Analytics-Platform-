@@ -222,6 +222,8 @@ services:
       HADOOP_CONF_DIR: /opt/spark/conf
       SPARK_LOCAL_DIRS: /tmp/spark-local
       PYSPARK_PYTHON: python3
+    volumes:
+      - spark_ivy_cache:/opt/spark/.ivy2.5.2
     mem_limit: 2g
     logging:
       driver: json-file
@@ -234,3 +236,4 @@ volumes:
   namenode_data:
   datanode_data:
   hive_metastore_data:
+  spark_ivy_cache:

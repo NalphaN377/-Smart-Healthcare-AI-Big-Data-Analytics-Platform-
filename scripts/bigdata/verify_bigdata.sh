@@ -54,7 +54,7 @@ spark_hive_output="$(
     --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020 \
     --conf spark.sql.hive.metastore.version=4.1.0 \
     --conf spark.sql.hive.metastore.jars=maven \
-    --conf 'spark.driver.extraJavaOptions=-Duser.home=/tmp -Divy.default.ivy.user.dir=/tmp/.ivy2' \
+    --conf 'spark.driver.extraJavaOptions=-Duser.home=/opt/spark' \
     /opt/medical/jobs/verify_hive.py 2>&1
 )"
 printf '%s\n' "$spark_hive_output"

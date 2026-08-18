@@ -225,8 +225,15 @@ def run(args: argparse.Namespace) -> int:
     null_cells = 0
     total_cells = 0
     started = time.perf_counter()
+    max_rows = getattr(args, "max_rows", None)
     try:
         for chunk_number, raw_chunk in enumerate(iter_data_chunks(source, args.chunksize), start=1):
+            if max_rows is not None:
+                remaining = max_rows - row_offset
+                if remaining <= 0:
+                    break
+                if len(raw_chunk) > remaining:
+                    raw_chunk = raw_chunk.iloc[:remaining].copy()
             cleaned, stats = clean_chunk(
                 raw_chunk,
                 source_file=source.path.name,
@@ -298,10 +305,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--report", default=str(PROJECT_ROOT / "docs" / "data_quality_report.md"))
     parser.add_argument("--chunksize", type=int, default=50_000)
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        help="Optional bounded preflight row count; omit for the full dataset",
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    if args.chunksize < 1:
-        parser.error("chunksize must be positive")
+    if args.chunksize < 1 or (args.max_rows is not None and args.max_rows < 1):
+        parser.error("chunksize and max-rows must be positive")
     return args
 
 

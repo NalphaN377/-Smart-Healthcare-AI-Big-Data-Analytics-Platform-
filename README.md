@@ -2,7 +2,7 @@
 
 第一阶段 MVP：将真实住院出院数据经过分块探查、Pandas 清洗、Parquet 存储、MySQL 批量入库和 PySpark/Python 聚合，通过 Flask REST API 提供给 Vue 3 + ECharts 中文驾驶舱。
 
-> 当前数据状态（2026-08-18）：仓库审计未找到 README 旧版所述的 SPARCS 原始数据。代码链路已使用明确隔离的 5 行测试夹具完成运行验证，但仓库中没有真实数据，因此不能给出或声称完整真实数据统计。将已有数据文件放到 `data/raw/` 后，按本文命令即可执行完整流程。
+> 当前数据状态（2026-08-18）：已从仓库根目录递归识别用户原有的 2021 SPARCS CSV（2,101,588 行、33 字段、793.81 MiB），完成全量探查、流式清洗、Spark 分析、MySQL 导入、API 与前端联调。清洗结果为 2,094,483 行，原始数据未移动、复制或修改。
 
 ## 系统架构
 
@@ -47,7 +47,7 @@ Hadoop/HDFS、Hive、LangChain 和 LLM 仅保留 Phase 2 扩展边界，本阶�
 ├── spark/jobs/medical_analytics.py
 ├── data/
 │   ├── raw/                     # 原始数据，只读且不入 Git
-│   └── processed/               # 唯一清洗 Parquet 与小型聚合 JSON
+│   └── processed/               # 唯一正式清洗 Parquet
 ├── docs/                        # 数据报告和原有项目文档
 ├── docker-compose.yml
 └── Makefile
@@ -62,7 +62,7 @@ Hadoop/HDFS、Hive、LangChain 和 LLM 仅保留 Phase 2 扩展边界，本阶�
 - Docker Desktop（仅用于正式按 Compose 启动 MySQL）。若本机已有独立 MySQL，也可通过环境变量连接。
 - 建议至少 8GB RAM；原始数据、Parquet 和 MySQL volume 需要足够磁盘。
 
-本次审计环境：macOS 15.6.1 arm64、Python 3.11.3、Java 17、Spark 4.1.1、Node 23.11.0。Docker 未安装；Homebrew MySQL 9.3 临时实例已用于 SQL 兼容性验证。
+本次全量验证环境：macOS 15.6.1 arm64、Python 3.11.3、Java 17、Spark 4.1.1、Node 23.11.0、Docker 29.7.2 / Compose 5.4.0。MySQL 8.4 容器通过 health check，并由本地 `.env` 配置映射至 `127.0.0.1:3307`；不会占用或停止本机 3306 服务。
 
 ## 安装
 
@@ -87,13 +87,13 @@ cp .env.example .env
 
 ## 数据准备
 
-将已有的唯一一份 CSV、TSV 或 Parquet 放入：
+脚本会从 Git 仓库根目录递归查找 CSV、TSV 或 Parquet；已有数据不需要移动或复制。推荐的新数据位置仍为：
 
 ```text
 data/raw/
 ```
 
-不要重命名、编辑或复制多份原始文件。脚本会根据表头自动选择医疗字段匹配最多的文件，并处理 BOM、大小写、空格、下划线、CSV/TSV 分隔符及常见编码差异。
+不要重命名、编辑或复制多份原始文件。扫描会跳过 `.git`、`.venv`、`node_modules`、`dist`、缓存、测试夹具和 `data/processed`，再根据表头映射覆盖率和文件大小选择真实数据；支持 BOM、大小写、空格、下划线、CSV/TSV 分隔符及常见编码差异。本次数据保留在 `009 医养项目数据/` 的原有嵌套路径中。
 
 统一内部字段包括 `facility_id`、`facility_name`、`age_group`、`length_of_stay`、`diagnosis_code`、`diagnosis_description`、`severity`、`payment_type_1`、`birth_weight`、`emergency_indicator`、`total_charges`、`total_costs` 等。CCS/CCSR 的常见旧字段名均有别名映射；缺失字段会在报告中明确标注，不会伪造。
 
@@ -126,6 +126,8 @@ data/processed/hospital_discharges_clean.parquet
 - 分类字段仅清理 Unicode、控制字符、重复空白和空值，不合并医学类别。
 - 出院年份限定 1900 至当前年份 + 1；急诊指标统一为 true/false/NULL。
 - 质量报告写入 `docs/data_quality_report.md`。
+
+如需在全量清洗前验证规则，可使用受限行数输出到系统临时目录，例如 `--max-rows 50000`；不要在项目中保留多份预运行数据。
 
 ## 数据库启动与导入
 
@@ -160,7 +162,7 @@ docker compose ps
 spark-submit --master 'local[*]' spark/jobs/medical_analytics.py
 ```
 
-输入清洗 Parquet，输出小型 `data/processed/analytics_summary.json`，完成总体指标、疾病 Top、疾病费用、年龄、医院、支付方式、严重程度和年度/疾病趋势。数据只有单一年份时，结果明确返回 `available: false`，不会制造年份。
+输入清洗 Parquet并完成总体指标、疾病 Top、疾病费用、年龄、医院、支付方式、严重程度和年度/疾病趋势。若只需要验证而不希望在项目内保留聚合文件，可用 `--output /private/tmp/medical_analytics.json`；数据只有单一年份时，结果明确返回 `available: false`，不会制造年份。
 
 ## 后端启动
 
@@ -221,7 +223,7 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
-当前共 13 个测试，覆盖字段/类型、费用非负、住院天数、出生体重、完全去重、主要 API、参数错误和 AI 预留端点。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+当前共 14 个测试，覆盖递归数据发现、字段/类型、费用非负、住院天数、出生体重、完全去重、主要 API、参数错误和 AI 预留端点。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
 
 ## API 列表
 
@@ -244,16 +246,15 @@ npm run build
 
 ## 当前功能与验证状态
 
-- 数据探查与无数据阻塞报告：已实际运行。
-- 分块清洗/Parquet/验证：已用隔离夹具实际运行，5 → 4 条，删除 1 条完全重复。
-- MySQL 表、8 个业务/唯一索引、批量导入和幂等重跑：已用临时本机 MySQL 实际运行。
-- Spark 8 类分析：已在 Spark 4.1.1 `local[*]` 实际运行。
-- Flask 真实 SQL API、HTTP curl：已实际运行。
-- pytest：13/13 通过。
+- 数据探查：已对 793.81 MiB、2,101,588 行真实 CSV 分 43 块运行，33/33 字段映射成功。
+- 分块清洗/Parquet/验证：真实数据 2,101,588 → 2,094,483 行，删除 7,105 条完全重复；最终 Parquet 102.78 MiB。
+- MySQL 表、业务/唯一索引、批量导入和幂等重跑：首次插入 2,094,483 行；第二次跳过 2,094,483 行且未重复写入。
+- Spark 8 类分析：已在 Spark 4.1.1 `local[*]` 对完整 Parquet 实际运行。
+- Flask 真实 SQL API：11 个 GET 端点均由 curl 验证为 HTTP 200，AI 预留端点按设计返回 501。
+- pytest：14/14 通过。
 - Vue production build：成功。
-- 浏览器联调：7 个 canvas、0 个页面错误、0 个控制台 warning/error；390px 无水平溢出。
-- Docker Compose：配置已提供，但当前机器没有 Docker，未声称容器启动成功。
-- 完整真实 SPARCS 清洗、导入与统计：因原始数据文件缺失而未运行。
+- 浏览器联调：4 个真实总体指标和 6 个 ECharts 成功加载，0 个控制台 warning/error；年度趋势因仅有 2021 年而显示真实 Empty 状态。
+- Docker Compose：MySQL 8.4 容器在 `127.0.0.1:3307` 通过 health check；完整导入后的 `COUNT(*)` 为 2,094,483。
 
 ## Git 与磁盘安全
 
@@ -263,11 +264,11 @@ npm run build
 
 ### `No CSV, TSV or Parquet dataset found`
 
-确认已有文件位于 `data/raw/`，不是 Finder `.textClipping`。不要把测试夹具移入生产数据目录。
+脚本会递归扫描仓库，但会主动排除测试夹具、生成数据和依赖目录。确认文件后缀为 CSV、TSV 或 Parquet 且当前用户可读；Finder `.textClipping` 不属于数据文件。
 
-### `docker: command not found`
+### Docker / Compose 无法连接
 
-安装 macOS Docker Desktop 后重新打开终端；本项目不要求 Ubuntu VM。若暂时使用本机 MySQL，设置 `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_PASSWORD`。
+确认 macOS Docker Desktop 正在运行，再执行 `docker compose ps`。若 3306 已被本机 MySQL 使用，可像本次验证一样在 `.env` 中设置 `MYSQL_PORT=3307`；应用不会硬编码端口，也不要求停止本机服务。
 
 ### MySQL `Access denied`
 

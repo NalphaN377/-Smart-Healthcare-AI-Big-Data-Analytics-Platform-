@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 
 from backend.app.utils.cleaning import clean_chunk
 from backend.app.utils.columns import OUTPUT_COLUMNS
+from backend.app.utils.data_io import discover_data_file
 from backend.scripts.clean_data import run
 
 
@@ -70,3 +71,18 @@ def test_chunked_pipeline_removes_exact_duplicates(tmp_path):
     assert len(set(parquet.read(columns=["record_hash"])["record_hash"].to_pylist())) == 4
     assert "Reconciled: **True**" in report.read_text(encoding="utf-8")
 
+
+def test_discovery_scans_nested_project_and_excludes_processed_and_tests(tmp_path):
+    nested = tmp_path / "arbitrary" / "deep" / "dataset.csv"
+    nested.parent.mkdir(parents=True)
+    nested.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    processed = tmp_path / "data" / "processed" / "generated.csv"
+    processed.parent.mkdir(parents=True)
+    processed.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    test_copy = tmp_path / "backend" / "tests" / "fixture.csv"
+    test_copy.parent.mkdir(parents=True)
+    test_copy.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    discovered = discover_data_file(project_root=tmp_path)
+    assert discovered.path == nested.resolve()
+    assert len(discovered.column_mapping) == 33

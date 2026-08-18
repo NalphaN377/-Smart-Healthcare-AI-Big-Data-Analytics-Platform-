@@ -101,8 +101,9 @@ def write_missing_report(output: Path, message: str) -> None:
         f"- Generated: {datetime.now().isoformat(timespec='seconds')}\n"
         "- Status: **BLOCKED — required field missing / source dataset not found**\n"
         f"- Detail: `{message}`\n\n"
-        "No row counts or medical statistics were fabricated. Place the existing source file in "
-        "`data/raw/` and rerun `python backend/scripts/inspect_data.py`.\n",
+        "No row counts or medical statistics were fabricated. Confirm that an existing CSV, TSV, "
+        "or Parquet file is readable somewhere under the repository root, then rerun "
+        "`python backend/scripts/inspect_data.py`.\n",
         encoding="utf-8",
     )
 

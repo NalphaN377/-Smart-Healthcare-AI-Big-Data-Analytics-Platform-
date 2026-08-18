@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -80,25 +81,37 @@ def inspect_source(path: str | Path) -> SourceInfo:
     )
 
 
-def discover_data_file(explicit: str | Path | None = None) -> SourceInfo:
+def _project_candidates(project_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    excluded_names = {".git", ".venv", "node_modules", "dist", "__pycache__", ".pytest_cache"}
+    excluded_subtrees = {("data", "processed"), ("backend", "tests")}
+
+    for directory, child_directories, filenames in os.walk(project_root, followlinks=False):
+        current = Path(directory)
+        relative_parts = current.relative_to(project_root).parts
+        if any(relative_parts[: len(subtree)] == subtree for subtree in excluded_subtrees):
+            child_directories[:] = []
+            continue
+        child_directories[:] = [name for name in child_directories if name not in excluded_names]
+        for filename in filenames:
+            path = current / filename
+            if not path.is_symlink() and path.suffix.casefold() in SUPPORTED_SUFFIXES:
+                candidates.append(path)
+    return candidates
+
+
+def discover_data_file(
+    explicit: str | Path | None = None, project_root: str | Path | None = None
+) -> SourceInfo:
     if explicit:
         return inspect_source(explicit)
 
-    raw_dir = PROJECT_ROOT / "data" / "raw"
-    candidates = [
-        path
-        for path in raw_dir.rglob("*")
-        if path.is_file() and path.suffix.casefold() in SUPPORTED_SUFFIXES
-    ]
-    candidates.extend(
-        path
-        for path in PROJECT_ROOT.iterdir()
-        if path.is_file() and path.suffix.casefold() in SUPPORTED_SUFFIXES
-    )
+    root = Path(project_root).expanduser().resolve() if project_root else PROJECT_ROOT
+    candidates = _project_candidates(root)
     if not candidates:
         raise FileNotFoundError(
-            f"No CSV, TSV or Parquet dataset found in {raw_dir}. "
-            "Place the existing medical source file there without copying it more than once."
+            f"No CSV, TSV or Parquet medical dataset found recursively under {root}. "
+            "The scan excludes generated data/processed, tests, dependencies and Git internals."
         )
 
     inspected: list[SourceInfo] = []

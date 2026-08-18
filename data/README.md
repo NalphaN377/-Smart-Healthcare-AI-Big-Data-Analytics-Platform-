@@ -1,8 +1,8 @@
 # 数据目录
 
-- `raw/`：放置唯一一份原始医疗数据（CSV、TSV 或 Parquet）。脚本只读该目录，不修改原文件。
-- `processed/`：只保留最终清洗文件 `hospital_discharges_clean.parquet`，以及可选的小型聚合结果 `analytics_summary.json`。
+- `raw/`：推荐放置唯一一份原始医疗数据（CSV、TSV 或 Parquet）。脚本也会递归识别仓库内其他嵌套位置，不要求复制或移动用户已有文件；原文件始终只读。
+- `processed/`：本轮只保留最终清洗文件 `hospital_discharges_clean.parquet`。Spark 验证用的小型聚合结果应输出至系统临时目录并在验证后删除。
 
 患者级数据均被 `.gitignore` 排除。`.gitkeep` 仅用于保留目录结构。
 
-当前仓库审计（2026-08-18）未检测到 README 所描述的 SPARCS 原始数据；请将已有文件直接放入 `data/raw/`，不要复制多份或更改文件名。脚本会按表头自动识别。
+当前数据位于仓库根目录下的 `009 医养项目数据/` 嵌套目录，已由递归表头扫描识别。该目录与 SPARCS 文件名模式均被 `.gitignore` 排除。

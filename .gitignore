@@ -40,6 +40,10 @@ data/processed/*
 !data/processed/.gitkeep
 !data/README.md
 
+# The user-provided SPARCS dataset is nested outside data/raw.
+/009 医养项目数据/
+**/Hospital_Inpatient_Discharges__SPARCS_De-Identified__*.csv
+
 # Local import diagnostics
 docs/import_errors*.jsonl
 templates/

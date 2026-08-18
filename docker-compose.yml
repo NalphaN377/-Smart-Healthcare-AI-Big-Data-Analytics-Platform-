@@ -30,5 +30,207 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  namenode:
+    image: medical-ai-platform-hadoop:3.4.3
+    build:
+      context: ./docker/hadoop
+      dockerfile: Dockerfile
+    profiles: ["bigdata"]
+    restart: unless-stopped
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    environment:
+      ENSURE_NAMENODE_DIR: /data/name/current
+      HADOOP_HEAPSIZE_MAX: "512"
+    depends_on:
+      hadoop-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${HDFS_NAMENODE_RPC_PORT:-8020}:8020"
+      - "127.0.0.1:${HDFS_NAMENODE_UI_PORT:-9870}:9870"
+    volumes:
+      - namenode_data:/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "hdfs dfsadmin -safemode get 2>/dev/null | grep -q 'Safe mode is OFF'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  datanode:
+    image: medical-ai-platform-hadoop:3.4.3
+    build:
+      context: ./docker/hadoop
+      dockerfile: Dockerfile
+    profiles: ["bigdata"]
+    restart: unless-stopped
+    hostname: datanode
+    command: ["hdfs", "datanode"]
+    environment:
+      HADOOP_HEAPSIZE_MAX: "512"
+    depends_on:
+      hadoop-init:
+        condition: service_completed_successfully
+      namenode:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${HDFS_DATANODE_UI_PORT:-9864}:9864"
+    volumes:
+      - datanode_data:/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "hdfs dfsadmin -report 2>/dev/null | grep -q 'Live datanodes (1)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  hadoop-init:
+    image: medical-ai-platform-hadoop:3.4.3
+    build:
+      context: ./docker/hadoop
+      dockerfile: Dockerfile
+    profiles: ["bigdata"]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /namenode/name /datanode/data &&
+        chown -R 1000:100 /namenode /datanode
+    volumes:
+      - namenode_data:/namenode
+      - datanode_data:/datanode
+    restart: "no"
+
+  hive-metastore:
+    image: medical-ai-platform-hive-metastore:4.1.0
+    build:
+      context: ./docker
+      dockerfile: hive/Dockerfile.metastore
+    profiles: ["bigdata"]
+    restart: unless-stopped
+    hostname: hive-metastore
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: derby
+      SERVICE_OPTS: >-
+        -Xmx512m
+        -Djavax.jdo.option.ConnectionURL=jdbc:derby:;databaseName=/opt/hive/data/metastore_db;create=true
+        -Dhive.metastore.warehouse.dir=hdfs://namenode:8020/medical/warehouse
+        -Dhive.metastore.schema.verification=false
+    depends_on:
+      hive-init:
+        condition: service_completed_successfully
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${HIVE_METASTORE_PORT:-9083}:9083"
+    volumes:
+      - hive_metastore_data:/opt/hive/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9083'"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  hive-init:
+    image: medical-ai-platform-hive-metastore:4.1.0
+    build:
+      context: ./docker
+      dockerfile: hive/Dockerfile.metastore
+    profiles: ["bigdata"]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /metastore &&
+        chown -R 1000:1000 /metastore
+    volumes:
+      - hive_metastore_data:/metastore
+    restart: "no"
+
+  hiveserver2:
+    image: medical-ai-platform-hive:4.1.0
+    build:
+      context: ./docker
+      dockerfile: hive/Dockerfile
+    profiles: ["bigdata"]
+    restart: unless-stopped
+    hostname: hiveserver2
+    environment:
+      SERVICE_NAME: hiveserver2
+      IS_RESUME: "true"
+      SERVICE_OPTS: >-
+        -Xmx1024m
+        -Dhive.metastore.uris=thrift://hive-metastore:9083
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${HIVE_SERVER2_PORT:-10001}:10000"
+      - "127.0.0.1:${HIVE_SERVER2_UI_PORT:-10002}:10002"
+    mem_limit: 1536m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "beeline -u 'jdbc:hive2://127.0.0.1:10000/default' --silent=true -e 'SELECT 1' >/dev/null 2>&1",
+        ]
+      interval: 20s
+      timeout: 15s
+      retries: 24
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  spark-client:
+    image: medical-ai-platform-spark-client:4.1.1
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    profiles: ["tools"]
+    hostname: spark-client
+    working_dir: /opt/medical
+    environment:
+      HADOOP_CONF_DIR: /opt/spark/conf
+      SPARK_LOCAL_DIRS: /tmp/spark-local
+      PYSPARK_PYTHON: python3
+    mem_limit: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
 volumes:
   mysql_data:
+  namenode_data:
+  datanode_data:
+  hive_metastore_data:

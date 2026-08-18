@@ -96,6 +96,7 @@ function toolLabel(tool) {
       </div>
       <nav class="header-actions" aria-label="主要导航">
         <RouterLink class="header-link" to="/">数据驾驶舱</RouterLink>
+        <RouterLink class="header-link" to="/cost-prediction">费用估计</RouterLink>
         <RouterLink class="header-link" to="/data-quality">数据质量</RouterLink>
         <span class="service-status" :class="providerConfigured ? 'status-online' : 'status-offline'"><i />{{ providerLabel || '检查 AI 服务中' }}</span>
       </nav>

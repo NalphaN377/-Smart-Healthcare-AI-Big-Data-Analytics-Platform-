@@ -21,6 +21,7 @@ from .api import (
     disease,
     health,
     hospital,
+    ml,
     overview,
     payment,
     severity,
@@ -33,6 +34,7 @@ from .config import Config
 from .repositories.analytics_repository import AnalyticsRepository
 from .services.data_quality_service import DataQualityService
 from .utils.responses import error_response
+from backend.ml import CostPredictionService
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -54,6 +56,12 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.extensions["analytics_repository"] = repository
     app.extensions["data_quality_service"] = DataQualityService(
         app.config["DATA_QUALITY_METRICS_PATH"]
+    )
+    app.extensions["cost_prediction_service"] = app.config.get(
+        "ML_SERVICE_INSTANCE"
+    ) or CostPredictionService(
+        app.config["ML_MODEL_PATH"],
+        app.config["ML_METADATA_PATH"],
     )
     tool_registry = app.config.get("AI_TOOL_REGISTRY") or ToolRegistry(repository)
     conversation_store = app.config.get("AI_CONVERSATION_STORE")
@@ -84,6 +92,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         overview.blueprint,
         disease.blueprint,
         hospital.blueprint,
+        ml.blueprint,
         cost.blueprint,
         data_quality.blueprint,
         age.blueprint,

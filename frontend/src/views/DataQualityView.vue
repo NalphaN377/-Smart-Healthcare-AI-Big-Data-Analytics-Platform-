@@ -106,6 +106,7 @@ onMounted(loadQuality)
       </div>
       <nav class="header-actions" aria-label="主要导航">
         <RouterLink class="header-link" to="/">数据驾驶舱</RouterLink>
+        <RouterLink class="header-link" to="/cost-prediction">费用估计</RouterLink>
         <RouterLink class="header-link" to="/ai">AI 智能分析</RouterLink>
         <button type="button" @click="loadQuality">刷新快照</button>
       </nav>

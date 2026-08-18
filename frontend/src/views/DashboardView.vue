@@ -183,6 +183,7 @@ onMounted(loadDashboard)
         <h1>智慧医疗大数据与 AI 大模型分析平台</h1>
       </div>
       <div class="header-actions">
+        <RouterLink class="header-link" to="/cost-prediction">费用估计</RouterLink>
         <RouterLink class="header-link" to="/data-quality">数据质量</RouterLink>
         <RouterLink class="header-link" to="/ai">AI 智能分析</RouterLink>
         <span class="service-status" :class="`status-${health}`">

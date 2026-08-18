@@ -36,6 +36,14 @@ class Config:
         "DATA_QUALITY_METRICS_PATH",
         str(PROJECT_ROOT / "docs/data_quality_metrics.json"),
     )
+    ML_MODEL_PATH = os.getenv(
+        "ML_MODEL_PATH",
+        str(PROJECT_ROOT / "backend/ml/artifacts/cost_model.joblib"),
+    )
+    ML_METADATA_PATH = os.getenv(
+        "ML_METADATA_PATH",
+        str(PROJECT_ROOT / "backend/ml/model_metadata.json"),
+    )
     CORS_ORIGINS = [
         value.strip()
         for value in os.getenv(

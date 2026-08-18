@@ -1,17 +1,45 @@
-# Claude Code 本地设置（不应提交）
-.claude
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
 
-# Office 临时/锁定文件
-~$*
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Vite
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# macOS, editors and logs
+.DS_Store
+*.log
 *.tmp
 *.lock
+~$*
+*.textClipping
+.claude/
+.idea/
+.vscode/
 
-# Python 缓存
-__pycache__/
-*.pyc
+# Spark/Hadoop local state
+spark-warehouse/
+.sparkStaging/
+metastore_db/
+derby.log
 
-# 本地文档
+# Medical datasets and generated analytics (never commit patient-level data)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+!data/README.md
 
-# 原始数据集不提交（794MB 超大文件，远超 GitHub 100MB 限制）
-data/
+# Local import diagnostics
+docs/import_errors*.jsonl
 templates/

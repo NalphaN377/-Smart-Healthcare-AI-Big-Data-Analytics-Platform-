@@ -1,6 +1,6 @@
 # 智慧医疗大数据与 AI 大模型分析平台
 
-项目已完成 Phase 1 业务 MVP 和 Phase 2A 单机大数据环境：真实住院数据经过分块探查、Pandas 清洗和单一 Parquet 存储，同时进入 MySQL 业务查询链路与 HDFS/Hive/Spark 离线分析链路，最后由 Flask REST API 和 Vue 3 + ECharts 提供中文驾驶舱。
+项目已完成 Phase 1 业务 MVP、Phase 2A 单机大数据环境和 Phase 2B AI 智能交互层：真实住院数据经过分块探查、Pandas 清洗和单一 Parquet 存储，进入 MySQL 实时查询与 HDFS/Hive/Spark 离线分析链路；Flask、LangChain 受控 Tool Calling、可替换 LLM Provider 和 Vue 3 + ECharts 提供中文驾驶舱与多轮 AI 分析页面。
 
 > 当前数据状态（2026-08-18）：已从仓库根目录递归识别用户原有的 2021 SPARCS CSV（2,101,588 行、33 字段、793.81 MiB），清洗为 2,094,483 行、37 字段的正式 Parquet。MySQL、Local Parquet、HDFS、Hive、Spark 和 API 的记录数均为 2,094,483，医疗机构数均为 205；原始数据未移动、复制或修改。
 
@@ -12,6 +12,10 @@
 Local cleaned Parquet（唯一正式版本）
         ├──→ MySQL hospital_discharges ──→ Flask API ──→ Vue + ECharts
         │       高频交互查询
+        │                 ↑
+        │       受控 Analytics Tools ← LangChain Agent ← LLM Provider
+        │                 ↓
+        │       grounded summary + safe ChartSpec → Vue AI Chat
         ├──→ HDFS（replication=1） ──→ Hive EXTERNAL TABLE
         │                                      ↓
         └──→ Spark local[*]（local / HDFS 可配置）←── Hive Metastore
@@ -20,14 +24,14 @@ Local cleaned Parquet（唯一正式版本）
 
 统一统计口径：**医疗机构数量 = 清洗后非空 `facility_name` 的区分大小写 distinct 数量**。该指标不使用 `facility_id` 回退，避免脱敏机构名称与数字 ID 混合计数。
 
-Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`；不部署多节点 Spark/Hadoop 集群。LangChain、LLM、Tool Calling、Redis 和多轮对话属于 Phase 2B，当前未实现。
+Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`；不部署多节点 Spark/Hadoop 集群。Phase 2B 的交互查询继续使用 MySQL，不让每次 AI 提问触发 Spark/HDFS 全表扫描。Redis、本地大模型和 Spark Cluster 未部署。
 
 ## 技术栈
 
 - macOS / Apple Silicon；Python 3.11、Pandas、PyArrow、PySpark local mode。
 - Hadoop 3.4.3 HDFS、Hive 4.1.0 Metastore/Server2、Spark 4.1.1，均使用官方 ARM64 镜像。
 - MySQL 8.4 官方多架构 Docker 镜像；PyMySQL 批量入库。
-- Flask Application Factory、Flask-CORS、pytest。
+- Flask Application Factory、Pydantic 2、LangChain 1、OpenAI-compatible Provider、Flask-CORS、pytest。
 - Vue 3、Vite、ECharts；无大型 UI 框架。
 
 ## 目录结构
@@ -37,7 +41,7 @@ Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`�
 ├── backend/
 │   ├── app/
 │   │   ├── api/                 # REST 端点与参数校验
-│   │   ├── ai/                  # Phase 2B AI Provider 协议
+│   │   ├── ai/                  # Agent、Provider、Tools、会话、ChartSpec
 │   │   ├── repositories/        # 参数化 MySQL 查询
 │   │   ├── services/            # 业务服务层
 │   │   └── utils/               # 字段映射、分块 IO、清洗规则
@@ -227,7 +231,9 @@ external.table.purge: false
 scripts/bigdata/verify_bigdata.sh
 ```
 
-验证包括 HDFS report/文件可读性、Hive 全量记录与五类业务查询、Spark 从 HDFS 复用八类分析，以及 Spark SQL 通过 Hive Metastore 4.1 读取外部表。预期硬性结果是 2,094,483 行和 205 家非空医疗机构。Spark-Hive 首次运行需临时解析 Hive 4.1 client jars，会比 HDFS Parquet 直读慢；缓存位于一次性容器 `/tmp`，容器 `--rm` 后不长期占用磁盘。
+验证包括 HDFS report/文件可读性、Hive 全量记录与五类业务查询、Spark 从 HDFS 复用八类分析，以及 Spark SQL 通过 Hive Metastore 4.1 读取外部表。预期硬性结果是 2,094,483 行和 205 家非空医疗机构。
+
+Spark-Hive 首次运行需要解析 279 个 Hive 4.1 client artifact。`spark_ivy_cache` 命名卷挂载到实际的 `/opt/spark/.ivy2.5.2`，因此一次性工具容器 `--rm` 后仍保留依赖。实际补齐缓存耗时 349.13 秒，随后完全热启动为 8.80 秒（Spark SQL 本体 5.40 秒）；不会再重复约 11 分钟的冷启动下载。
 
 ### 停止、重启与持久化
 
@@ -241,7 +247,8 @@ scripts/bigdata/start_bigdata.sh
 - `mysql_data`：Phase 1 业务表；
 - `namenode_data`：HDFS 元数据；
 - `datanode_data`：HDFS 单副本 Parquet block；
-- `hive_metastore_data`：Hive Derby 元数据。
+- `hive_metastore_data`：Hive Derby 元数据；
+- `spark_ivy_cache`：Spark→Hive Maven/Ivy 依赖，不含医疗数据。
 
 **不要执行 `docker compose down -v`、`docker volume prune` 或 `docker system prune -a`。** 除非已明确决定删除所有 Docker 数据。HDFS/Hive 数据只在 Docker volume 中，不写入 Git 仓库。
 
@@ -270,10 +277,10 @@ docker compose --profile tools run --rm --no-deps spark-client \
 .venv/bin/python backend/run.py
 ```
 
-默认监听 `http://127.0.0.1:5000`。健康检查：
+默认监听 `http://127.0.0.1:5001`，避免 macOS Control Center 使用的 5000。健康检查：
 
 ```bash
-curl http://127.0.0.1:5000/api/health
+curl http://127.0.0.1:5001/api/health
 ```
 
 所有响应使用：
@@ -295,6 +302,66 @@ curl http://127.0.0.1:5000/api/health
 
 错误只返回安全消息，不向前端泄露 traceback。支持 `limit`（1–100）、`year`、`age_group`、`hospital` 和 `diagnosis`；未知或非法参数返回 HTTP 400。
 
+## AI Architecture
+
+```text
+User / Vue AI Chat
+        ↓ POST /api/ai/query
+MedicalAnalyticsAgent
+        ↓ Provider 只负责选择 allow-listed tool
+LangChain structured tool calling
+        ↓ Pydantic 参数校验（limit 1–50）
+ToolRegistry → 现有 Service / Repository → MySQL
+        ↓ 结构化真实结果
+Provider 中文摘要 → GroundingGuard → deterministic ChartPlanner
+        ↓
+answer + tool_calls + sources + safe ChartSpec → Vue / ECharts
+```
+
+Agent 无权生成或执行任意 SQL，不连接 Shell/HDFS/Hive，不调用任意 URL，不读取或返回 `.env`。八个 Tool 仅复用现有 service/repository：
+
+- `get_overview`
+- `get_top_diseases`
+- `get_disease_cost_analysis`
+- `get_hospital_analysis`
+- `get_age_analysis`
+- `get_payment_distribution`
+- `get_severity_analysis`
+- `get_year_trend`
+
+`get_year_trend` 会读取真实年份。当前只有 2021 年，因此明确返回跨年趋势不可用，并且不生成 line chart。图表仅允许 `bar`、`horizontal_bar`、`pie`、`line` 和 `table` 的 Pydantic `ChartSpec`；前端不执行模型生成的 JavaScript。
+
+### 配置 Provider
+
+默认 Provider 是 `openai_compatible`，可连接 OpenAI-compatible、Qwen 或其他兼容服务：
+
+```text
+AI_PROVIDER=openai_compatible
+LLM_API_KEY=replace_locally
+LLM_MODEL=provider_model_name
+LLM_BASE_URL=https://provider-compatible-endpoint/v1
+LLM_TIMEOUT_SECONDS=30
+AI_MAX_TURNS=10
+```
+
+以上值只写入本地 `.env`，禁止提交或记录 Key。`LLM_BASE_URL` 对官方兼容默认端点可留空。Provider 未配置时 `POST /api/ai/query` 返回 HTTP 503，但 MySQL、HDFS、Hive、Spark、Dashboard 和全部普通 analytics API 继续运行。测试专用 `DeterministicTestProvider` 只能通过显式依赖注入或验证脚本使用，生产环境不会自动选择它。
+
+### 多轮上下文与安全边界
+
+内存版 `ConversationStore` 默认每个会话最多保留 10 轮，仅保存问题、Tool 名、已验证参数和最多 3 行结果摘要，不保存全量数据；接口已抽象，后续可替换 Redis。追问可继承 dimension、metric、top_k、`age_group`、`hospital` 和其他已有 filter。
+
+摘要 Prompt 禁止创造数字/年份、编造医学因果、提供患者个体诊断建议或把住院记录数伪称独立患者人数。`GroundingGuard` 会检查摘要中的数字和年份；若发现 Tool 结果之外的数字，回退到确定性真实数据表述。系统是数据分析与教学演示平台，不是医疗诊断系统。
+
+请求示例：
+
+```bash
+curl -X POST http://127.0.0.1:5001/api/ai/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"住院人数最多的五种疾病是什么？"}'
+```
+
+成功响应包含 `answer`、实际 `tool_calls` 与参数、`sources`、安全 `chart`、`session_id`，以及 Provider/Tool/总耗时；不包含 chain-of-thought。错误口径为：参数/Tool 校验 400、unsupported query 422、Provider 未配置 503、Provider timeout 504、上游 Provider failure 502。
+
 ## 前端启动
 
 ```bash
@@ -305,10 +372,10 @@ npm run dev
 访问 `http://127.0.0.1:5173`。开发代理将 `/api` 转发到 Flask；也可在 `frontend/.env` 设置：
 
 ```text
-VITE_API_BASE_URL=http://127.0.0.1:5000/api
+VITE_API_BASE_URL=http://127.0.0.1:5001/api
 ```
 
-驾驶舱包含 4 个总体指标，以及疾病 Top10、年龄分布、医疗费用、医院排行、支付方式、病情严重程度和年度趋势 7 个 ECharts 图表。所有统计均来自 API，并包含 Loading、Empty、Error 和移动端布局。
+驾驶舱包含 4 个总体指标，以及疾病 Top10、年龄分布、医疗费用、医院排行、支付方式、病情严重程度和年度趋势 7 个 ECharts 区域。`/ai` 是响应式聊天页面，提供 6 个真实可回答的示例问题、有限多轮会话、Provider/Loading/Error/Empty 状态、Tool 与数据来源展示，并按后端 `ChartSpec` 动态渲染 ECharts。所有业务统计均来自 API，不含 fixture/mock 或前端硬编码结果。
 
 生产构建：
 
@@ -323,7 +390,15 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
-当前共 18 个测试，覆盖递归数据发现、字段/类型、费用非负、住院天数、出生体重、完全去重、统一机构计数口径、主要 API、参数错误、AI 预留端点、HDFS 单副本配置、Hive 外部表合约和 Hive 机构数口径。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+当前共 52 个测试，覆盖原 Phase 1/2A 数据与 API 回归，以及 AI Tool allow-list、Pydantic schema/limit/enum、Agent 路由、3 类多轮上下文、GroundingGuard、ChartSpec、防任意 JavaScript、会话上限、Provider 未配置/超时/失败、医学因果边界与个体医疗建议拒绝。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+
+连接真实 MySQL、使用明确标记为测试用途的 deterministic Provider 验证 10 个问题和 3 组追问：
+
+```bash
+.venv/bin/python backend/scripts/validate_ai_agent.py
+```
+
+该脚本不调用外部 LLM，也不伪装生产 Provider；它只验证自然语言路由、真实 analytics service 结果、grounding、ChartSpec 与多轮参数继承。HDFS/Hive/Spark 重型回归独立执行 `scripts/bigdata/verify_bigdata.sh`，不放入日常 pytest。
 
 ## API 列表
 
@@ -340,7 +415,8 @@ npm run build
 | GET | `/api/payments/distribution` | 第一支付方式及全量占比 |
 | GET | `/api/severity/distribution` | 严重程度、费用与住院时长 |
 | GET | `/api/trends/year` | 年度住院量与费用趋势 |
-| POST | `/api/ai/query` | Phase 2B 预留，当前返回 501 |
+| GET | `/api/ai/status` | Provider 配置状态（不返回 Key/Base URL） |
+| POST | `/api/ai/query` | 受控 Tool Calling、grounded 中文洞察、ChartSpec、多轮会话 |
 
 疾病数据不含患者唯一标识，因此接口准确表述为“住院记录数”，不伪称去重患者数。
 
@@ -350,16 +426,18 @@ npm run build
 - 分块清洗/Parquet/验证：真实数据 2,101,588 → 2,094,483 行，删除 7,105 条完全重复；最终 Parquet 102.78 MiB。
 - MySQL 表、业务/唯一索引、批量导入和幂等重跑：首次插入 2,094,483 行；第二次跳过 2,094,483 行且未重复写入。
 - Spark 8 类分析：已在 Spark 4.1.1 `local[*]` 对完整 Parquet 实际运行。
-- Flask 真实 SQL API：11 个 GET 端点均由 curl 验证为 HTTP 200，AI 预留端点按设计返回 501。
-- pytest：18/18 通过。
+- Flask 真实 SQL API：12 个 GET 端点均由 curl 验证为 HTTP 200；未配置 LLM Key 时 AI query 按设计返回 503，普通 API 不受影响。
+- AI 自然语言验证：10 个真实问题与 3 组多轮追问全部命中预期 Tool，数据来源均为 MySQL 全量 2,094,483 条记录。
+- pytest：52/52 通过。
 - Vue production build：成功。
-- 浏览器联调：4 个真实总体指标和 6 个 ECharts 成功加载，0 个控制台 warning/error；年度趋势因仅有 2021 年而显示真实 Empty 状态。
+- 浏览器联调：驾驶舱 4 个真实总体指标和 7 个 ECharts 区域加载成功；AI 页面 Provider 状态、示例、安全提示和禁用输入正确，0 个控制台 warning/error。
 - 一致性核验：原始 profiling、清洗 Parquet、Spark、MySQL 和 API 的医疗机构数统一为 205。
 - Docker Compose：MySQL 8.4 容器在 `127.0.0.1:3307` 通过 health check；完整导入后的 `COUNT(*)` 为 2,094,483。
 - HDFS：NameNode/DataNode healthy，仅 1 个 107,773,178 字节 Parquet block，`replication=1`，`fsck` 为 HEALTHY。
 - Hive：`medical_analytics.hospital_discharges` 外部表返回 2,094,483 行和 205 家机构，疾病、费用、支付和严重程度查询已实际运行。
-- Spark HDFS：同一八类分析在 `local[*]` 下耗时 9.51 秒，Rows=2,094,483，Facility Count=205；Spark SQL 经 Hive Metastore 交叉读取也通过。
-- Phase 2A 回归：pytest 18/18，Vue production build 成功，真实 `/api/overview` 仍为 2,094,483 / 205。
+- Spark HDFS：同一八类分析在 `local[*]` 下最终耗时 11.16 秒，Rows=2,094,483，Facility Count=205；Spark SQL 经 Hive Metastore 交叉读取也通过。
+- Spark→Hive cache：279 个 artifact 持久化，补齐缓存 349.13 秒，第二次热启动 8.80 秒，完整 `verify_bigdata.sh` 通过。
+- Phase 2B 回归：pytest 52/52、Vue production build、全部真实 HTTP、MySQL/HDFS/Hive/Spark 均通过；`/api/overview` 仍为 2,094,483 / 205。
 
 ## Git 与磁盘安全
 
@@ -391,10 +469,15 @@ npm run build
 
 依次检查 `/api/health`、Flask 输出和 MySQL 健康状态；前端不使用假数据降级。
 
-## 后续规划（Phase 2B）
+### AI 页面显示 `AI provider not configured`
 
-- LangChain Agent、LLM Tool Calling、多轮对话；
-- 智能图表生成；
-- Redis 缓存与任务队列。
+这是未配置 `LLM_API_KEY` 或 `LLM_MODEL` 时的预期安全状态。只在本地 `.env` 配置 Provider，不要修改 `.env.example` 写入真实 Key。该状态不会影响 Dashboard 和普通 analytics API。
 
-进入 Phase 2B 前应继续保留 MySQL 作为 Flask 交互查询层，HDFS/Hive/Spark 作为离线分析层；不应让每个 API 请求实时全表扫描 HDFS。Phase 2B 组件当前均未部署。
+## 后续规划（Phase 3）
+
+- Redis 会话/缓存与慢查询热点缓存；
+- 数据质量看板；
+- 机器学习分析与可解释性；
+- SQL/索引与前端 bundle 性能优化。
+
+Phase 2B 已具备进入 Phase 3 的接口基础，但本轮未部署 Redis、机器学习服务或 Spark Cluster。继续保留 MySQL 作为交互查询层，HDFS/Hive/Spark 作为离线分析层。

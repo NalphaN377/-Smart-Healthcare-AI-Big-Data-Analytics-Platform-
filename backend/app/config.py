@@ -32,6 +32,10 @@ class Config:
     REDIS_DB = int(os.getenv("REDIS_DB", "0"))
     REDIS_CACHE_TTL = max(1, int(os.getenv("REDIS_CACHE_TTL", "300")))
     REDIS_SESSION_TTL = max(60, int(os.getenv("REDIS_SESSION_TTL", "86400")))
+    DATA_QUALITY_METRICS_PATH = os.getenv(
+        "DATA_QUALITY_METRICS_PATH",
+        str(PROJECT_ROOT / "docs/data_quality_metrics.json"),
+    )
     CORS_ORIGINS = [
         value.strip()
         for value in os.getenv(

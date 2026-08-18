@@ -65,6 +65,17 @@ a { color: inherit; }
 .section-heading h2 { margin: 0 0 5px; font-size: 21px; }
 .section-heading p, .section-heading span { margin: 0; color: #667784; font-size: 13px; }
 .overview-error { margin-bottom: 14px; padding: 12px 14px; color: #9a332d; background: #fff1ef; border: 1px solid #f2c5c0; border-radius: 8px; }
+.quality-loading { min-height: 300px; display: flex; align-items: center; justify-content: center; gap: 9px; color: #667784; }
+.quality-metrics { margin-bottom: 16px; }
+.quality-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.quality-facts span { padding: 14px 16px; color: #647681; background: #fff; border: 1px solid #dfe6ea; border-radius: 9px; font-size: 12px; }
+.quality-facts b { display: block; margin-bottom: 5px; color: #164c68; font-size: 20px; }
+.quality-table-card { margin-top: 16px; padding: 18px; background: #fff; border: 1px solid #dfe6ea; border-radius: 10px; box-shadow: 0 2px 7px rgb(36 64 80 / 5%); }
+.quality-table-wrap { margin-top: 14px; overflow-x: auto; }
+.quality-table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.quality-table-wrap th, .quality-table-wrap td { padding: 11px 12px; border-bottom: 1px solid #e6ecef; text-align: left; }
+.quality-table-wrap th { color: #536873; background: #f7f9fa; }
+.quality-table-wrap code { color: #36586a; }
 
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
 .metric-card, .chart-card {
@@ -136,6 +147,7 @@ a { color: inherit; }
 
 @media (max-width: 900px) {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quality-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
   .chart-wide { grid-column: auto; }
   .ai-layout { grid-template-columns: 1fr; }
@@ -149,6 +161,7 @@ a { color: inherit; }
   .app-title { min-width: calc(100% - 70px); }
   .header-actions { width: 100%; justify-content: space-between; }
   .metric-grid { grid-template-columns: 1fr; }
+  .quality-facts { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; }
   .chart-card { min-height: 360px; padding: 14px; }
   .chart-canvas, .state-box { height: 285px; min-height: 285px; }

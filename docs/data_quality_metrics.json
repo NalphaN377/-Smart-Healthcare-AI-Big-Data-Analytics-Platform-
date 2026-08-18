@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-18T10:09:33+00:00",
+  "total_rows": 2094483,
+  "total_columns": 37,
+  "duplicate_rows_removed": 7105,
+  "duplicate_rows_remaining": 0,
+  "facility_count": 205,
+  "completeness_score": 92.04,
+  "validity_score": 100.0,
+  "consistency_score": 100.0,
+  "fields": [
+    {
+      "field": "age_group",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    {
+      "field": "facility_name",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    {
+      "field": "diagnosis_description",
+      "missing_count": 1634,
+      "missing_rate": 0.078
+    },
+    {
+      "field": "severity",
+      "missing_count": 2548,
+      "missing_rate": 0.1217
+    },
+    {
+      "field": "payment_type_1",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    {
+      "field": "length_of_stay",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    {
+      "field": "total_charges",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    {
+      "field": "total_costs",
+      "missing_count": 0,
+      "missing_rate": 0.0
+    }
+  ],
+  "anomalies": {
+    "negative_charges": 0,
+    "negative_costs": 0,
+    "invalid_length_of_stay": 0,
+    "invalid_birth_weight": 0,
+    "invalid_year": 0,
+    "invalid_emergency_indicator": 0
+  },
+  "source": {
+    "source_filename": "Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv",
+    "source_files": [
+      "Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv"
+    ],
+    "processed_filename": "hospital_discharges_clean.parquet"
+  }
+}

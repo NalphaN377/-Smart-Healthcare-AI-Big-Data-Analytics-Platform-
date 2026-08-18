@@ -13,11 +13,25 @@ from .ai import (
     ToolRegistry,
     build_provider,
 )
-from .api import age, ai, cost, disease, health, hospital, overview, payment, severity, system, trends
+from .api import (
+    age,
+    ai,
+    cost,
+    data_quality,
+    disease,
+    health,
+    hospital,
+    overview,
+    payment,
+    severity,
+    system,
+    trends,
+)
 from .cache import AnalyticsCache, CachedAnalyticsRepository, RedisClient
 from .api.params import ValidationError
 from .config import Config
 from .repositories.analytics_repository import AnalyticsRepository
+from .services.data_quality_service import DataQualityService
 from .utils.responses import error_response
 
 
@@ -38,6 +52,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.extensions["redis_client"] = redis_client
     app.extensions["analytics_cache"] = analytics_cache
     app.extensions["analytics_repository"] = repository
+    app.extensions["data_quality_service"] = DataQualityService(
+        app.config["DATA_QUALITY_METRICS_PATH"]
+    )
     tool_registry = app.config.get("AI_TOOL_REGISTRY") or ToolRegistry(repository)
     conversation_store = app.config.get("AI_CONVERSATION_STORE")
     if conversation_store is None:
@@ -68,6 +85,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         disease.blueprint,
         hospital.blueprint,
         cost.blueprint,
+        data_quality.blueprint,
         age.blueprint,
         payment.blueprint,
         severity.blueprint,

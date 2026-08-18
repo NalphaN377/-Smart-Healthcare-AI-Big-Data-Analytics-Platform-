@@ -47,7 +47,7 @@ class AnalyticsRepository:
             """
             SELECT
                 COUNT(*) AS total_records,
-                COUNT(DISTINCT COALESCE(CAST(facility_id AS CHAR), facility_name)) AS facility_count,
+                COUNT(DISTINCT BINARY NULLIF(TRIM(facility_name), '')) AS facility_count,
                 AVG(length_of_stay) AS avg_length_of_stay,
                 AVG(total_charges) AS avg_total_charges,
                 AVG(total_costs) AS avg_total_costs,

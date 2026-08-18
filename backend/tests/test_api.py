@@ -16,6 +16,7 @@ def test_health(client):
 def test_overview(client):
     payload = assert_success(client.get("/api/overview?year=2021"))
     assert payload["data"]["total_records"] == 4
+    assert payload["data"]["facility_count"] == 3
     assert payload["meta"]["filters"] == {"year": 2021}
 
 
@@ -60,4 +61,3 @@ def test_ai_endpoint_is_reserved(client):
     response = client.post("/api/ai/query", json={"query": "老年患者费用最高的疾病？"})
     assert response.status_code == 501
     assert response.get_json()["message"] == "AI module reserved for Phase 2"
-

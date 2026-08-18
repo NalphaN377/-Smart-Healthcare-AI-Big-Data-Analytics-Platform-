@@ -18,6 +18,8 @@ Flask REST API
 Vue 3 + ECharts 驾驶舱
 ```
 
+统一统计口径：**医疗机构数量 = 清洗后非空 `facility_name` 的区分大小写 distinct 数量**。该指标不使用 `facility_id` 回退，避免脱敏机构名称与数字 ID 混合计数。
+
 Hadoop/HDFS、Hive、LangChain 和 LLM 仅保留 Phase 2 扩展边界，本阶段不部署集群或付费模型。
 
 ## 技术栈
@@ -223,7 +225,7 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
-当前共 14 个测试，覆盖递归数据发现、字段/类型、费用非负、住院天数、出生体重、完全去重、主要 API、参数错误和 AI 预留端点。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+当前共 15 个测试，覆盖递归数据发现、字段/类型、费用非负、住院天数、出生体重、完全去重、统一机构计数口径、主要 API、参数错误和 AI 预留端点。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
 
 ## API 列表
 
@@ -251,9 +253,10 @@ npm run build
 - MySQL 表、业务/唯一索引、批量导入和幂等重跑：首次插入 2,094,483 行；第二次跳过 2,094,483 行且未重复写入。
 - Spark 8 类分析：已在 Spark 4.1.1 `local[*]` 对完整 Parquet 实际运行。
 - Flask 真实 SQL API：11 个 GET 端点均由 curl 验证为 HTTP 200，AI 预留端点按设计返回 501。
-- pytest：14/14 通过。
+- pytest：15/15 通过。
 - Vue production build：成功。
 - 浏览器联调：4 个真实总体指标和 6 个 ECharts 成功加载，0 个控制台 warning/error；年度趋势因仅有 2021 年而显示真实 Empty 状态。
+- 一致性核验：原始 profiling、清洗 Parquet、Spark、MySQL 和 API 的医疗机构数统一为 205。
 - Docker Compose：MySQL 8.4 容器在 `127.0.0.1:3307` 通过 health check；完整导入后的 `COUNT(*)` 为 2,094,483。
 
 ## Git 与磁盘安全

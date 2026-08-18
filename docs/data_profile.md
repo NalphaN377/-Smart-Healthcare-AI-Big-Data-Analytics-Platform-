@@ -1,6 +1,6 @@
 # Data Profile
 
-- Generated: 2026-08-18T10:36:03
+- Generated: 2026-08-18T11:06:09
 - File path: `/Users/liyichen/Documents/沟槽实习/009 医养项目数据/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv`
 - File size: 793.81 MiB
 - Format: csv
@@ -53,6 +53,11 @@
 ## Required fields missing
 
 - None
+
+## Metric definitions
+
+- Medical institution count: **205**
+- Definition: case-sensitive distinct cleaned, non-null and non-empty `facility_name`; `facility_id` is not used for this metric.
 
 ## Column statistics
 

@@ -6,6 +6,8 @@
 
 The raw source is opened read-only. Cleaning writes a hidden temporary Parquet next to the final processed path and atomically replaces only the processed output. A temporary SQLite primary-key table tracks row hashes across chunks and is removed after the run.
 
+The cross-component institution metric is defined as the case-sensitive distinct count of cleaned, non-null and non-empty `facility_name`. It deliberately does not coalesce `facility_id`, because redacted records can have a valid placeholder name but no numeric identifier. MySQL uses a binary expression so its collation semantics match Pandas and Spark.
+
 ## Boundaries
 
 - `app/utils`: source discovery, column contract, normalization.

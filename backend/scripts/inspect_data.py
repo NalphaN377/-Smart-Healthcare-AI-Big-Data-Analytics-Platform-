@@ -183,6 +183,8 @@ def build_report(args: argparse.Namespace) -> int:
     anomalies = "\n".join(
         f"- `{key}`: {value:,}" for key, value in sorted(anomaly_counts.items()) if key != "raw_rows"
     ) or "- No rule violations detected"
+    facility_profile = profiles["facility_name"]
+    facility_count = facility_profile.unique_display()
 
     report = f"""# Data Profile
 
@@ -207,6 +209,11 @@ def build_report(args: argparse.Namespace) -> int:
 ## Required fields missing
 
 {missing_lines}
+
+## Metric definitions
+
+- Medical institution count: **{facility_count}**
+- Definition: case-sensitive distinct cleaned, non-null and non-empty `facility_name`; `facility_id` is not used for this metric.
 
 ## Column statistics
 

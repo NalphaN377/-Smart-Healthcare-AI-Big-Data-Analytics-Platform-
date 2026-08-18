@@ -58,10 +58,14 @@ def run(input_path: Path, output_path: Path, limit: int) -> dict:
     frame = spark.read.parquet(str(input_path)).persist(StorageLevel.MEMORY_AND_DISK)
     try:
         total_records = frame.count()
+        normalized_facility_name = F.trim(F.col("facility_name").cast("string"))
         overview_row = frame.agg(
-            F.countDistinct(F.coalesce(F.col("facility_id").cast("string"), F.col("facility_name"))).alias(
-                "facility_count"
-            ),
+            F.countDistinct(
+                F.when(
+                    F.col("facility_name").isNotNull() & (normalized_facility_name != ""),
+                    normalized_facility_name,
+                )
+            ).alias("facility_count"),
             F.round(F.avg("length_of_stay"), 2).alias("avg_length_of_stay"),
             F.round(F.avg("total_charges"), 2).alias("avg_total_charges"),
             F.round(F.avg("total_costs"), 2).alias("avg_total_costs"),

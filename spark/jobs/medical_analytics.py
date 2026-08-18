@@ -15,6 +15,7 @@ from pyspark.storagelevel import StorageLevel
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "hospital_discharges_clean.parquet"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "processed" / "analytics_summary.json"
+DEFAULT_HDFS_URI = "hdfs://namenode:8020/medical/processed/hospital_discharges"
 
 
 def rows(frame: DataFrame, limit: int | None = None) -> list[dict]:
@@ -42,9 +43,18 @@ def grouped_analysis(
     return rows(result, limit)
 
 
-def run(input_path: Path, output_path: Path, limit: int) -> dict:
+def resolve_source(source: str, local_input: str, hdfs_uri: str) -> str:
+    if source == "hdfs":
+        if not hdfs_uri.startswith("hdfs://"):
+            raise ValueError("HDFS source must use an hdfs:// URI")
+        return hdfs_uri.rstrip("/")
+    input_path = Path(local_input).expanduser().resolve()
     if not input_path.is_file():
         raise FileNotFoundError(f"Clean Parquet not found: {input_path}")
+    return str(input_path)
+
+
+def run(input_uri: str, output_path: Path, limit: int) -> dict:
     spark = (
         SparkSession.builder.master("local[*]")
         .appName("medical-ai-platform-local-analytics")
@@ -55,7 +65,7 @@ def run(input_path: Path, output_path: Path, limit: int) -> dict:
     )
     spark.sparkContext.setLogLevel("WARN")
     started = time.perf_counter()
-    frame = spark.read.parquet(str(input_path)).persist(StorageLevel.MEMORY_AND_DISK)
+    frame = spark.read.parquet(input_uri).persist(StorageLevel.MEMORY_AND_DISK)
     try:
         total_records = frame.count()
         normalized_facility_name = F.trim(F.col("facility_name").cast("string"))
@@ -126,7 +136,7 @@ def run(input_path: Path, output_path: Path, limit: int) -> dict:
         )
         trend_available = len(yearly) > 1
         result = {
-            "source": str(input_path),
+            "source": input_uri,
             "generated_by": "PySpark local[*]",
             "overview": {"total_records": total_records, **overview_row.asDict()},
             "diseases_top": disease_top,
@@ -157,7 +167,17 @@ def run(input_path: Path, output_path: Path, limit: int) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="PySpark local-mode medical analytics")
+    parser.add_argument(
+        "--source",
+        choices=("local", "hdfs"),
+        default=os.getenv("MEDICAL_SPARK_SOURCE", "local"),
+        help="Read the same analytics pipeline from local or HDFS Parquet",
+    )
     parser.add_argument("--input", default=str(DEFAULT_INPUT))
+    parser.add_argument(
+        "--hdfs-uri",
+        default=os.getenv("MEDICAL_HDFS_URI", DEFAULT_HDFS_URI),
+    )
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
@@ -169,9 +189,19 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     arguments = parse_args()
     try:
-        summary = run(Path(arguments.input).resolve(), Path(arguments.output).resolve(), arguments.limit)
+        selected_source = resolve_source(arguments.source, arguments.input, arguments.hdfs_uri)
+        summary = run(selected_source, Path(arguments.output).resolve(), arguments.limit)
     except Exception as exc:
         print(f"Spark analysis failed: {exc}", file=sys.stderr)
         raise SystemExit(1)
     print(f"Spark records analyzed: {summary['overview']['total_records']:,}")
+    print(f"Spark facility count: {summary['overview']['facility_count']:,}")
+    print(f"Spark source: {summary['source']}")
+    print(
+        "Spark analyses completed: overview, diseases_top, diseases_cost, "
+        "age_analysis, hospital_analysis, payment_distribution, "
+        "severity_analysis, yearly_trends"
+    )
+    print(f"Spark yearly trend available: {summary['yearly_trends']['available']}")
+    print(f"Spark elapsed: {summary['elapsed_seconds']:.2f} seconds")
     print(f"Analytics summary: {Path(arguments.output).resolve()}")

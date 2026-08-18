@@ -20,6 +20,7 @@ def analytics_response(
     filters: dict[str, Any],
 ):
     count = len(data) if isinstance(data, list) else (1 if data else 0)
+    cache_telemetry = getattr(repository(), "cache_telemetry", lambda: {})()
     return success_response(
         data,
         {
@@ -28,6 +29,6 @@ def analytics_response(
             "filters": filters,
             "count": count,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+            **cache_telemetry,
         },
     )
-

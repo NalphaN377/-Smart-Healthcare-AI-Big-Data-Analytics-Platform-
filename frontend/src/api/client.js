@@ -36,3 +36,28 @@ export async function get(path, params = {}) {
     window.clearTimeout(timeout)
   }
 }
+
+export async function post(path, body, options = {}) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs || REQUEST_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.success) {
+      throw new ApiError(payload?.message || `请求失败（HTTP ${response.status}）`, response.status)
+    }
+    return payload
+  } catch (error) {
+    if (error.name === 'AbortError') throw new ApiError('AI 分析超时，请稍后重试', 504)
+    if (error instanceof ApiError) throw error
+    throw new ApiError('无法连接分析服务，请确认 Flask 后端已启动')
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}

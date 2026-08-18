@@ -183,6 +183,7 @@ onMounted(loadDashboard)
         <h1>智慧医疗大数据与 AI 大模型分析平台</h1>
       </div>
       <div class="header-actions">
+        <RouterLink class="header-link" to="/ai">AI 智能分析</RouterLink>
         <span class="service-status" :class="`status-${health}`">
           <i />{{ health === 'online' ? '数据服务正常' : health === 'offline' ? '数据服务异常' : '检查服务中' }}
         </span>

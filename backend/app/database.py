@@ -17,8 +17,8 @@ def connect_from_config(config: Mapping[str, Any], with_database: bool = True) -
         "charset": "utf8mb4",
         "cursorclass": DictCursor,
         "connect_timeout": int(config.get("MYSQL_CONNECT_TIMEOUT", 5)),
-        "read_timeout": 30,
-        "write_timeout": 30,
+        "read_timeout": int(config.get("MYSQL_READ_TIMEOUT", 30)),
+        "write_timeout": int(config.get("MYSQL_WRITE_TIMEOUT", 30)),
         "autocommit": False,
     }
     if with_database:
@@ -35,4 +35,3 @@ def database_connection(
         yield connection
     finally:
         connection.close()
-

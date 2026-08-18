@@ -17,6 +17,8 @@ class Config:
     MYSQL_USER = os.getenv("MYSQL_USER", "medical_user")
     MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
     MYSQL_CONNECT_TIMEOUT = int(os.getenv("MYSQL_CONNECT_TIMEOUT", "5"))
+    MYSQL_READ_TIMEOUT = int(os.getenv("MYSQL_READ_TIMEOUT", "30"))
+    MYSQL_WRITE_TIMEOUT = int(os.getenv("MYSQL_WRITE_TIMEOUT", "30"))
     CORS_ORIGINS = [
         value.strip()
         for value in os.getenv(
@@ -26,4 +28,10 @@ class Config:
     ]
     JSON_SORT_KEYS = False
     MAX_QUERY_LIMIT = 100
-
+    AI_PROVIDER = os.getenv("AI_PROVIDER", "openai_compatible")
+    LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+    LLM_MODEL = os.getenv("LLM_MODEL", "")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
+    LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+    AI_MAX_TURNS = min(20, max(1, int(os.getenv("AI_MAX_TURNS", "10"))))
+    AI_MAX_SESSIONS = min(2_000, max(1, int(os.getenv("AI_MAX_SESSIONS", "500"))))

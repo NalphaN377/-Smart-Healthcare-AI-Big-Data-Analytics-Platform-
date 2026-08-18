@@ -26,6 +26,9 @@ class AnalyticsRepository:
         if filters.get("diagnosis"):
             clauses.append("(diagnosis_code = %s OR diagnosis_description LIKE %s)")
             values.extend([filters["diagnosis"], f"%{filters['diagnosis']}%"])
+        if filters.get("admission_type"):
+            clauses.append("admission_type = %s")
+            values.append(filters["admission_type"])
         return (" WHERE " + " AND ".join(clauses) if clauses else ""), values
 
     def _fetch_all(self, sql: str, values: list[Any]) -> list[dict[str, Any]]:

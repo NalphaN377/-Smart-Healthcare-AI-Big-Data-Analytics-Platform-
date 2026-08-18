@@ -6,6 +6,7 @@ import pymysql
 from flask import Flask
 from flask_cors import CORS
 
+from .ai import InMemoryConversationStore, MedicalAnalyticsAgent, ToolRegistry, build_provider
 from .api import age, ai, cost, disease, health, hospital, overview, payment, severity, trends
 from .api.params import ValidationError
 from .config import Config
@@ -22,6 +23,20 @@ def create_app(test_config: dict | None = None) -> Flask:
     CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
     repository = app.config.get("ANALYTICS_REPOSITORY") or AnalyticsRepository(app.config)
     app.extensions["analytics_repository"] = repository
+    tool_registry = app.config.get("AI_TOOL_REGISTRY") or ToolRegistry(repository)
+    conversation_store = app.config.get("AI_CONVERSATION_STORE") or InMemoryConversationStore(
+        max_turns=app.config["AI_MAX_TURNS"],
+        max_sessions=app.config["AI_MAX_SESSIONS"],
+    )
+    provider = app.config.get("AI_PROVIDER_INSTANCE") or build_provider(app.config)
+    app.extensions["ai_tool_registry"] = tool_registry
+    app.extensions["ai_conversation_store"] = conversation_store
+    app.extensions["ai_provider"] = provider
+    app.extensions["medical_analytics_agent"] = MedicalAnalyticsAgent(
+        provider=provider,
+        registry=tool_registry,
+        conversation_store=conversation_store,
+    )
 
     for api_blueprint in (
         health.blueprint,

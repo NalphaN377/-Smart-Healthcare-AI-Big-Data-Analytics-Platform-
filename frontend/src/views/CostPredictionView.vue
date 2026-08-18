@@ -128,7 +128,7 @@ onMounted(loadStatus)
               <div><dt>训练样本</dt><dd>{{ formatCount(state.status.sample_size) }}</dd></div>
               <div><dt>测试集 MAE</dt><dd>{{ formatCurrency(state.status.metrics?.mae) }}</dd></div>
               <div><dt>基线 MAE</dt><dd>{{ formatCurrency(state.status.metrics?.baseline_mae) }}</dd></div>
-              <div><dt>测试集 R²</dt><dd>{{ formatDecimal(state.status.metrics?.r2, 4) }}</dd></div>
+              <div><dt>测试集 R²</dt><dd>{{ Number.isFinite(state.status.metrics?.r2) ? state.status.metrics.r2.toFixed(4) : '—' }}</dd></div>
             </dl>
           </aside>
         </section>

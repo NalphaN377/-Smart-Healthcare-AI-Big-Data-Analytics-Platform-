@@ -1,7 +1,7 @@
 # Data Profile
 
 - Generated: 2026-08-18T11:06:09
-- File path: `/Users/liyichen/Documents/沟槽实习/009 医养项目数据/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv`
+- File path (repository-relative): `009 医养项目数据/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv`
 - File size: 793.81 MiB
 - Format: csv
 - Encoding: utf-8-sig

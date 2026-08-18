@@ -1,8 +1,8 @@
 # Data Quality Report
 
 - Generated: 2026-08-18T10:37:21
-- Source: `/Users/liyichen/Documents/沟槽实习/009 医养项目数据/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv`
-- Clean output: `/Users/liyichen/Documents/沟槽实习/data/processed/hospital_discharges_clean.parquet`
+- Source (repository-relative): `009 医养项目数据/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv/Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv`
+- Clean output (repository-relative): `data/processed/hospital_discharges_clean.parquet`
 - Elapsed time: 59.27 seconds
 
 ## Row reconciliation

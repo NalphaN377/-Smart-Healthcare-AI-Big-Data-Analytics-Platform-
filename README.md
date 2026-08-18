@@ -1,37 +1,40 @@
 # 智慧医疗大数据与 AI 大模型分析平台
 
-项目已完成 Phase 1 业务 MVP、Phase 2A 单机大数据环境和 Phase 2B AI 智能交互层：真实住院数据经过分块探查、Pandas 清洗和单一 Parquet 存储，进入 MySQL 实时查询与 HDFS/Hive/Spark 离线分析链路；Flask、LangChain 受控 Tool Calling、可替换 LLM Provider 和 Vue 3 + ECharts 提供中文驾驶舱与多轮 AI 分析页面。
+项目已完成 Phase 1 业务 MVP、Phase 2A 单机大数据环境、Phase 2B AI 智能交互与 Phase 3 工程强化：真实住院数据经过分块探查、Pandas 清洗和单一 Parquet 存储，进入 MySQL 实时查询与 HDFS/Hive/Spark 离线分析链路；Redis 提供可降级的聚合缓存与 AI 会话持久化；Flask、LangChain 受控 Tool Calling、可替换 LLM Provider、scikit-learn 和 Vue 3 + ECharts 提供驾驶舱、数据质量、费用估计与多轮 AI 分析页面。
 
 > 当前数据状态（2026-08-18）：已从仓库根目录递归识别用户原有的 2021 SPARCS CSV（2,101,588 行、33 字段、793.81 MiB），清洗为 2,094,483 行、37 字段的正式 Parquet。MySQL、Local Parquet、HDFS、Hive、Spark 和 API 的记录数均为 2,094,483，医疗机构数均为 205；原始数据未移动、复制或修改。
 
 ## 系统架构
 
 ```text
-原始 CSV（只读）
-        ↓ Pandas 分块清洗
-Local cleaned Parquet（唯一正式版本）
-        ├──→ MySQL hospital_discharges ──→ Flask API ──→ Vue + ECharts
-        │       高频交互查询
-        │                 ↑
-        │       受控 Analytics Tools ← LangChain Agent ← LLM Provider
-        │                 ↓
-        │       grounded summary + safe ChartSpec → Vue AI Chat
-        ├──→ HDFS（replication=1） ──→ Hive EXTERNAL TABLE
-        │                                      ↓
-        └──→ Spark local[*]（local / HDFS 可配置）←── Hive Metastore
-                大规模聚合、离线分析和交叉验证
+原始 CSV（只读） → Pandas 分块清洗 → cleaned Parquet（唯一正式版本）
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    ↓                                         ↓
+             MySQL hospital_discharges                 HDFS（replication=1）
+                    ↓                                         ↓
+             Analytics Service                         Hive EXTERNAL TABLE
+               ↙            ↘                                ↓
+   Redis analytics cache     AI Tool Layer ← LLM       Spark local[*]
+                               ↑                       离线分析/交叉验证
+                     Redis AI session store
+                               ↓
+             Flask API → Vue + ECharts / AI Chat
+
+cleaned Parquet → 数据质量快照生成器 → 轻量 JSON → Data Quality API/Dashboard
+cleaned Parquet → 可复现采样训练 → sklearn 模型 → Cost Prediction API/Page
 ```
 
 统一统计口径：**医疗机构数量 = 清洗后非空 `facility_name` 的区分大小写 distinct 数量**。该指标不使用 `facility_id` 回退，避免脱敏机构名称与数字 ID 混合计数。
 
-Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`；不部署多节点 Spark/Hadoop 集群。Phase 2B 的交互查询继续使用 MySQL，不让每次 AI 提问触发 Spark/HDFS 全表扫描。Redis、本地大模型和 Spark Cluster 未部署。
+Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`；不部署多节点 Spark/Hadoop 集群。交互查询继续使用 MySQL，不让每次 AI 提问触发 Spark/HDFS 全表扫描。Redis 是可选加速层；关闭或不可连接时 Analytics 与 AI 会话自动降级。本地大模型与 Spark Cluster 未部署。
 
 ## 技术栈
 
 - macOS / Apple Silicon；Python 3.11、Pandas、PyArrow、PySpark local mode。
 - Hadoop 3.4.3 HDFS、Hive 4.1.0 Metastore/Server2、Spark 4.1.1，均使用官方 ARM64 镜像。
-- MySQL 8.4 官方多架构 Docker 镜像；PyMySQL 批量入库。
-- Flask Application Factory、Pydantic 2、LangChain 1、OpenAI-compatible Provider、Flask-CORS、pytest。
+- MySQL 8.4、Redis 7.4 官方多架构 Docker 镜像；PyMySQL 批量入库、redis-py。
+- Flask Application Factory、Pydantic 2、LangChain 1、OpenAI-compatible Provider、scikit-learn、Flask-CORS、pytest。
 - Vue 3、Vite、ECharts；无大型 UI 框架。
 
 ## 目录结构
@@ -42,10 +45,12 @@ Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`�
 │   ├── app/
 │   │   ├── api/                 # REST 端点与参数校验
 │   │   ├── ai/                  # Agent、Provider、Tools、会话、ChartSpec
+│   │   ├── cache/               # Redis client、聚合缓存与安全降级
 │   │   ├── repositories/        # 参数化 MySQL 查询
 │   │   ├── services/            # 业务服务层
 │   │   └── utils/               # 字段映射、分块 IO、清洗规则
 │   ├── scripts/                 # 探查、清洗、建库、导入、验证
+│   ├── ml/                      # 费用模型训练、元数据与推理服务
 │   ├── sql/schema.sql
 │   ├── tests/
 │   ├── requirements.txt
@@ -69,7 +74,8 @@ Phase 2A 仅部署 1 个 NameNode 和 1 个 DataNode，Spark 仍为 `local[*]`�
 
 ## 环境要求
 
-- **macOS** 13+（本项目不要求 Ubuntu、VMware 或 Linux VM）。
+- **macOS** 13+ 是当前完整实测平台（不要求 Ubuntu、VMware 或 Linux VM）。
+- Windows 10/11 通过 Docker Desktop + WSL2 作为推荐兼容路径；见“Windows / WSL2”章节。
 - Python 3.11+。
 - Java 17 与 Spark 4.x；已有 `spark-submit` 时不要再安装重复 PySpark。
 - Node.js：建议 22.18 LTS 或 24.11+；本机 Node 23.11 已实际构建成功，但部分最新传递依赖会给出非 LTS engine 警告。
@@ -148,7 +154,7 @@ data/processed/hospital_discharges_clean.parquet
 1. 启动官方 MySQL 8.4：
 
 ```bash
-docker compose up -d mysql
+docker compose up -d mysql redis
 docker compose ps
 ```
 
@@ -169,6 +175,47 @@ docker compose ps
 - `record_hash`：精确去重与幂等导入。
 
 没有为低频展示字段创建索引，以控制 200 万级记录的写入和磁盘成本。
+
+## Redis 缓存与 AI 会话
+
+Redis 7.4 使用官方多架构镜像、AOF `everysec`、healthcheck、日志轮转和 `redis_data` 命名卷，只绑定 `127.0.0.1`。默认端口 6379；若宿主机已有 Redis，可在本地 `.env` 设置其他端口，例如 `REDIS_PORT=6380`，无需停止现有服务。
+
+```text
+REDIS_ENABLED=true
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_CACHE_TTL=300
+REDIS_SESSION_TTL=86400
+```
+
+Analytics 缓存只保存聚合结果，不保存原始病历行。key 由 Tool/API、排序后的 filters、limit 和 metric 生成稳定 SHA-256；默认 TTL 300 秒。`GET /api/system/cache/status` 仅返回 enabled、connected、backend 和 ttl，不暴露 URI 或凭据。
+
+AI 会话使用 `RedisConversationStore` 保存最多 10 轮的小型问题、Tool 参数和摘要；Flask 重启后仍可恢复。Redis 禁用或不可连接时，聚合查询直接回源 MySQL，会话自动回退到 `InMemoryConversationStore`，API contract 不变。不要执行 `docker compose down -v`，否则会删除命名卷。
+
+MySQL 8.4 的 `EXPLAIN ANALYZE` 显示：固定 Dashboard 的全局分组仍需消费 2,094,483 行。现有紧凑维度索引已在合适查询中使用，Phase 3 没有添加低选择性或宽 covering index。实测 Redis hit 为 0.34–0.78 ms，而对应冷聚合为 0.63–8.35 秒；详见 `docs/sql_performance_before.md` 与 `docs/sql_performance_after.md`。
+
+## 数据质量 Dashboard
+
+以下命令从正式 cleaned Parquet 流式生成轻量机器可读快照，不在打开页面时扫描 209 万行：
+
+```bash
+.venv/bin/python backend/scripts/generate_data_quality_metrics.py
+```
+
+快照为 `docs/data_quality_metrics.json`，页面路径为 `/data-quality`。当前实测：2,094,483 行、37 列、205 家机构，完整性 92.04%、有效性 100%、一致性 100%；诊断描述缺失 1,634 条、严重程度缺失 2,548 条，其余列出的关键字段无缺失。异常规则结果和生成时间均由后端 API 返回，前端不硬编码真实指标。
+
+## 住院费用估计
+
+训练目标为 `total_costs`。模型明确排除 `total_costs`、`total_charges`、`length_of_stay`、来源元数据、行号和 hash；输入只使用年龄组、性别、入院类型、CCSR 诊断代码、严重程度、死亡风险、医疗/外科分类、急诊标志和第一支付方式。
+
+```bash
+.venv/bin/python backend/ml/train_cost_model.py
+```
+
+训练脚本流式读取正式 Parquet，默认以固定随机种子从全文件选择 200,000 行，按 160,000/40,000 划分训练/测试，并训练 `OrdinalEncoder + log-target HistGradientBoostingRegressor`。正式实测：MAE 12,461.03、RMSE 38,134.04、R² 0.2301，中位数基线 MAE 15,863.92。joblib 工件默认位于 `backend/ml/artifacts/` 且被 Git 忽略；模型元数据和限制记录在 `docs/ml_cost_prediction_report.md`。
+
+模型状态与推理页面分别为 `/api/ml/cost-prediction/status`、`/api/ml/cost-prediction/predict` 和 `/cost-prediction`。模型未训练时 status 明确 unavailable，predict 返回安全的 503。该功能仅用于数据分析和教学展示，不构成医疗建议、临床决策或费用结算依据。
 
 ## Phase 2A 单机大数据环境
 
@@ -349,7 +396,7 @@ AI_MAX_TURNS=10
 
 ### 多轮上下文与安全边界
 
-内存版 `ConversationStore` 默认每个会话最多保留 10 轮，仅保存问题、Tool 名、已验证参数和最多 3 行结果摘要，不保存全量数据；接口已抽象，后续可替换 Redis。追问可继承 dimension、metric、top_k、`age_group`、`hospital` 和其他已有 filter。
+`ConversationStore` 默认每个会话最多保留 10 轮，仅保存问题、Tool 名、已验证参数和最多 3 行结果摘要，不保存全量数据。Redis 可用时会话带 TTL 持久化；不可用时自动回退内存版。追问可继承 dimension、metric、top_k、`age_group`、`hospital` 和其他已有 filter。
 
 摘要 Prompt 禁止创造数字/年份、编造医学因果、提供患者个体诊断建议或把住院记录数伪称独立患者人数。`GroundingGuard` 会检查数字、年份、费用/成本字段标签、分类名称和工具未提供的币种；任何一项不一致都会回退到确定性 Tool Result 表述。响应 meta 分别报告 routing、Tool/MySQL、summary、总耗时与 token usage。系统是数据分析与教学演示平台，不是医疗诊断系统。
 
@@ -376,7 +423,7 @@ npm run dev
 VITE_API_BASE_URL=http://127.0.0.1:5001/api
 ```
 
-驾驶舱包含 4 个总体指标，以及疾病 Top10、年龄分布、医疗费用、医院排行、支付方式、病情严重程度和年度趋势 7 个 ECharts 区域。`/ai` 是响应式聊天页面，提供 6 个真实可回答的示例问题、有限多轮会话、Provider/Loading/Error/Empty 状态、Tool 与数据来源展示，并按后端 `ChartSpec` 动态渲染 ECharts。所有业务统计均来自 API，不含 fixture/mock 或前端硬编码结果。
+驾驶舱包含 4 个总体指标，以及疾病 Top10、年龄分布、医疗费用、医院排行、支付方式、病情严重程度和年度趋势 7 个 ECharts 区域。`/ai` 是响应式聊天页，`/data-quality` 展示离线质量快照，`/cost-prediction` 提供严格受控的模型输入和免责声明。四个主要页面均通过 Vue Router dynamic import 懒加载；初始 JS 从 675.70 kB 降至 89.49 kB。所有业务统计均来自 API，不含 fixture/mock 或前端硬编码结果。
 
 生产构建：
 
@@ -391,7 +438,7 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
-当前共 58 个测试，覆盖原 Phase 1/2A 数据与 API 回归，以及 AI Tool allow-list、Pydantic schema/limit/enum、Agent 路由、3 类多轮上下文、GroundingGuard（含费用/成本标签与币种）、token usage、DeepSeek non-thinking 安全状态、ChartSpec、防任意 JavaScript、会话上限、Provider 未配置/超时/失败、医学因果边界与个体医疗建议拒绝。测试 fixture 会显式注入未配置 Provider，不会受开发者本机 API Key 影响。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+当前共 78 个测试，覆盖原 Phase 1/2A 数据与 API 回归、Redis unavailable fallback/hit/miss/key/TTL/session、数据质量快照、ML schema/无泄漏/推理/不可用状态，以及 AI Tool allow-list、Agent 路由、3 类多轮上下文、GroundingGuard、token usage、ChartSpec、防任意 JavaScript、Provider 错误与医疗安全边界。测试 fixture 会显式注入未配置 Provider，不会受开发者本机 API Key 影响。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
 
 连接真实 MySQL、使用明确标记为测试用途的 deterministic Provider 验证 10 个问题和 3 组追问：
 
@@ -422,8 +469,13 @@ npm run build
 | GET | `/api/payments/distribution` | 第一支付方式及全量占比 |
 | GET | `/api/severity/distribution` | 严重程度、费用与住院时长 |
 | GET | `/api/trends/year` | 年度住院量与费用趋势 |
+| GET | `/api/system/cache/status` | Redis 缓存安全状态 |
+| GET | `/api/data-quality/summary` | 数据质量总体快照 |
+| GET | `/api/data-quality/fields` | 关键字段缺失率 |
 | GET | `/api/ai/status` | Provider 配置状态（不返回 Key/Base URL） |
 | POST | `/api/ai/query` | 受控 Tool Calling、grounded 中文洞察、ChartSpec、多轮会话 |
+| GET | `/api/ml/cost-prediction/status` | 费用模型状态、特征与指标 |
+| POST | `/api/ml/cost-prediction/predict` | 严格校验的住院费用估计 |
 
 疾病数据不含患者唯一标识，因此接口准确表述为“住院记录数”，不伪称去重患者数。
 
@@ -435,20 +487,35 @@ npm run build
 - Spark 8 类分析：已在 Spark 4.1.1 `local[*]` 对完整 Parquet 实际运行。
 - Flask 真实 SQL API：12 个 GET 端点均由 curl 验证为 HTTP 200；未配置 LLM Key 时 AI query 按设计返回 503，普通 API 不受影响。
 - AI 自然语言验证：10 个真实问题与 3 组多轮追问全部命中预期 Tool，数据来源均为 MySQL 全量 2,094,483 条记录。
-- pytest：52/52 通过。
-- Vue production build：成功。
-- 浏览器联调：驾驶舱 4 个真实总体指标和 7 个 ECharts 区域加载成功；AI 页面 Provider 状态、示例、安全提示和禁用输入正确，0 个控制台 warning/error。
+- Redis：项目容器在本机已有 6379 服务的情况下使用 `127.0.0.1:6380`，health check 通过；聚合 hit telemetry 与跨进程会话恢复已实测。
+- 数据质量：真实 Parquet 快照生成耗时 11.6 秒；API 与 `/data-quality` 图表/表格通过浏览器验证。
+- 费用模型：200,000 行训练样本，训练 3.15 秒，MAE 12,461.03；状态、推理 API 和 `/cost-prediction` 实际交互通过。
+- pytest：78/78 通过。
+- Vue production build：成功；初始 JS 89.49 kB，四页懒加载。
+- 浏览器联调：Dashboard、AI、Data Quality、Cost Prediction 均加载成功；真实费用推理返回，0 个控制台 warning/error。
 - 一致性核验：原始 profiling、清洗 Parquet、Spark、MySQL 和 API 的医疗机构数统一为 205。
 - Docker Compose：MySQL 8.4 容器在 `127.0.0.1:3307` 通过 health check；完整导入后的 `COUNT(*)` 为 2,094,483。
 - HDFS：NameNode/DataNode healthy，仅 1 个 107,773,178 字节 Parquet block，`replication=1`，`fsck` 为 HEALTHY。
 - Hive：`medical_analytics.hospital_discharges` 外部表返回 2,094,483 行和 205 家机构，疾病、费用、支付和严重程度查询已实际运行。
 - Spark HDFS：同一八类分析在 `local[*]` 下最终耗时 11.16 秒，Rows=2,094,483，Facility Count=205；Spark SQL 经 Hive Metastore 交叉读取也通过。
 - Spark→Hive cache：279 个 artifact 持久化，补齐缓存 349.13 秒，第二次热启动 8.80 秒，完整 `verify_bigdata.sh` 通过。
-- Phase 2B 回归：pytest 52/52、Vue production build、全部真实 HTTP、MySQL/HDFS/Hive/Spark 均通过；`/api/overview` 仍为 2,094,483 / 205。
+- Phase 3 回归：pytest 78/78、Vue production build、全部真实 HTTP、MySQL/Redis/HDFS/Hive/Spark 均通过；`/api/overview` 仍为 2,094,483 / 205。一次最小真实 DeepSeek 回归命中 `get_top_diseases(limit=5)`，没有生成 SQL 或 JavaScript。
 
 ## Git 与磁盘安全
 
-`.env`、虚拟环境、缓存、日志、`node_modules`、`dist`、Spark 临时目录以及 `data/raw/*` / `data/processed/*` 均被忽略，仅保留 `.gitkeep` 与 `data/README.md`。不要用 `git add -f data/raw/...`。HDFS/Hive 数据位于 Docker 命名卷，不在 repository 内。项目不会下载第二份原始数据，也不会生成多版 CSV/Parquet。
+`.env`、虚拟环境、模型工件、缓存、日志、`node_modules`、`dist`、Spark 临时目录以及未跟踪的 `data/raw/*` / `data/processed/*` 均被忽略。正式 `hospital_discharges_clean.parquet` 是唯一例外，已明确由 Git LFS 管理；不要用 `git add -f` 添加其他医疗数据。HDFS/Hive 数据位于 Docker 命名卷，不在 repository 内。项目不会下载第二份原始数据，也不会生成多版 CSV/Parquet。
+
+## Windows 10/11 + WSL2
+
+Windows 推荐通过 WSL2 执行 Python、Git、Make 与 Bash 脚本，并由 Docker Desktop 提供 Linux containers。该路径是 **supported by design / recommended deployment path**；完整端到端实测平台仍是 macOS Apple Silicon，不能表述为 Windows 已实测通过。
+
+1. 安装 WSL2（推荐 Ubuntu 发行版，仅作为 Windows 的 WSL 用户空间）和 Docker Desktop，启用对应 WSL integration。
+2. 将仓库放在 WSL 文件系统（如 `~/projects/medical-ai-platform`），避免 `/mnt/c` 上大量 Parquet/Node 小文件的 I/O 开销。
+3. 在 WSL 终端执行本文 Bash 命令；不要从 PowerShell 直接运行 `scripts/bigdata/*.sh`。
+4. 安装 Python 3.11+、Node LTS、Git LFS 和 Java 17；Docker 镜像不写死 arm64，官方镜像会选择 x86_64 变体。
+5. 本地 `.env` 使用 `MYSQL_HOST=127.0.0.1` 及 Docker 映射端口。若 3306/6379 已占用，仅调整宿主端口，不修改容器内端口。
+
+Python 路径均通过 `pathlib` 或仓库根目录动态解析，文档和代码不含开发者机器绝对路径。Compose 未设置固定 `platform`，命名卷与健康检查在 macOS/WSL2 采用同一配置。WSL2 仍应自行完成 `pytest`、`npm run build` 与全链路数据计数验收。
 
 ## 常见问题
 
@@ -480,11 +547,8 @@ npm run build
 
 这是未配置 `LLM_API_KEY` 或 `LLM_MODEL` 时的预期安全状态。只在本地 `.env` 配置 Provider，不要修改 `.env.example` 写入真实 Key。该状态不会影响 Dashboard 和普通 analytics API。
 
-## 后续规划（Phase 3）
+## Phase 3 完成状态与后续边界
 
-- Redis 会话/缓存与慢查询热点缓存；
-- 数据质量看板；
-- 机器学习分析与可解释性；
-- SQL/索引与前端 bundle 性能优化。
+Phase 3 已完成 Redis 会话/聚合缓存、真实 SQL profiling、数据质量看板、无直接费用泄漏的费用估计、前端 route splitting、macOS 全链路验收与 WSL2 兼容性整理。已知限制：当前数据仅有 2021，无法形成跨年趋势；固定全局聚合的冷查询仍可能需要数秒；ECharts lazy chunk 仍约 560 kB；费用模型受行政数据特征和重尾目标限制，不应用于诊断、临床决策或结算。
 
-Phase 2B 已具备进入 Phase 3 的接口基础，但本轮未部署 Redis、机器学习服务或 Spark Cluster。继续保留 MySQL 作为交互查询层，HDFS/Hive/Spark 作为离线分析层。
+后续可以评估 Redis 预热/监控、数据质量历史快照、模型解释和系统级性能优化，但本轮不引入 Kubernetes、Kafka、本地大模型或 Spark Cluster。

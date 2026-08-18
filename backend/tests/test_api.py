@@ -22,7 +22,7 @@ def test_overview(client):
 
 def test_diseases_top(client):
     payload = assert_success(client.get("/api/diseases/top?limit=5"))
-    assert payload["data"][0]["diagnosis"] == "Influenza"
+    assert payload["data"][0]["diagnosis"] == "Disease 1"
 
 
 def test_hospitals_top(client):
@@ -57,7 +57,14 @@ def test_invalid_and_unknown_parameters_return_safe_error(client):
         assert "Traceback" not in payload["message"]
 
 
-def test_ai_endpoint_is_reserved(client):
+def test_ai_endpoint_reports_provider_unavailable_without_breaking_analytics(client):
     response = client.post("/api/ai/query", json={"query": "老年患者费用最高的疾病？"})
-    assert response.status_code == 501
-    assert response.get_json()["message"] == "AI module reserved for Phase 2"
+    assert response.status_code == 503
+    assert response.get_json()["message"] == "LLM provider not configured"
+    assert client.get("/api/overview").status_code == 200
+
+
+def test_ai_status_is_safe(client):
+    payload = assert_success(client.get("/api/ai/status"))
+    assert payload["data"]["configured"] is False
+    assert "api_key" not in str(payload).lower()

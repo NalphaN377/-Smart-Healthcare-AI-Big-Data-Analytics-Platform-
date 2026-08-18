@@ -163,9 +163,32 @@ class AIQueryRequest(StrictModel):
         return value
 
 
+class TokenUsage(StrictModel):
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    cache_read_tokens: int = Field(default=0, ge=0)
+    cache_miss_tokens: int = Field(default=0, ge=0)
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_miss_tokens=self.cache_miss_tokens + other.cache_miss_tokens,
+        )
+
+
+class ProviderSummary(StrictModel):
+    text: str = Field(min_length=1, max_length=5000)
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)
+
+
 class ToolDecision(StrictModel):
     tool: str = Field(min_length=1, max_length=80)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)
 
 
 class AIQueryData(StrictModel):

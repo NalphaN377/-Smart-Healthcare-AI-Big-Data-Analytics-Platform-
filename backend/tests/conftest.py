@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.app import create_app
+from backend.app.ai.provider import UnconfiguredProvider
 
 
 class FakeAnalyticsRepository:
@@ -85,6 +86,7 @@ def app():
         {
             "TESTING": True,
             "ANALYTICS_REPOSITORY": FakeAnalyticsRepository(),
+            "AI_PROVIDER_INSTANCE": UnconfiguredProvider(),
             "CORS_ORIGINS": ["http://localhost:5173"],
         }
     )

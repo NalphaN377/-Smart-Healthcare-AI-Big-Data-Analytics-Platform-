@@ -96,6 +96,38 @@ def test_grounding_guard_replaces_invented_numbers():
     assert "4 条住院记录" in data.answer
 
 
+def test_grounding_guard_rejects_swapped_charge_and_cost_labels():
+    class MislabelingProvider(DeterministicTestProvider):
+        def summarize(self, query, result):
+            return "Disease 1 的平均总费用为 800.25。"
+
+    agent = MedicalAnalyticsAgent(
+        provider=MislabelingProvider(),
+        registry=ToolRegistry(FakeAnalyticsRepository()),
+        conversation_store=InMemoryConversationStore(),
+    )
+    data, meta = agent.query("哪些疾病平均费用最高？")
+    assert "平均总费用 1,200.50" in data.answer
+    assert "平均总成本 800.25" in data.answer
+    assert meta["grounding_fallback"] is True
+    assert meta["grounding_fallback_reason"] == "metric_label_mismatch"
+
+
+def test_grounding_guard_rejects_currency_not_present_in_tool_result():
+    class CurrencyProvider(DeterministicTestProvider):
+        def summarize(self, query, result):
+            return "Disease 1 的平均总费用为 1,200.50 美元。"
+
+    agent = MedicalAnalyticsAgent(
+        provider=CurrencyProvider(),
+        registry=ToolRegistry(FakeAnalyticsRepository()),
+        conversation_store=InMemoryConversationStore(),
+    )
+    data, meta = agent.query("哪些疾病平均费用最高？")
+    assert "美元" not in data.answer
+    assert meta["grounding_fallback_reason"] == "currency_not_in_tool_result"
+
+
 def test_causal_question_keeps_observation_and_causality_boundary_separate():
     data, _ = make_agent().query("为什么 COVID-19 的费用高？")
     assert data.tool_calls[0].tool == "get_disease_cost_analysis"

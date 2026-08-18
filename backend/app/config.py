@@ -33,5 +33,6 @@ class Config:
     LLM_MODEL = os.getenv("LLM_MODEL", "")
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
     LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+    LLM_THINKING_MODE = os.getenv("LLM_THINKING_MODE", "disabled")
     AI_MAX_TURNS = min(20, max(1, int(os.getenv("AI_MAX_TURNS", "10"))))
     AI_MAX_SESSIONS = min(2_000, max(1, int(os.getenv("AI_MAX_SESSIONS", "500"))))

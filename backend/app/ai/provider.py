@@ -7,7 +7,13 @@ from typing import Any, Protocol
 
 from .errors import ProviderFailure, ProviderNotConfigured, ProviderTimeout, UnsupportedQuery
 from .prompts import ROUTING_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT
-from .schemas import ConversationTurn, ToolDecision, ToolResult
+from .schemas import (
+    ConversationTurn,
+    ProviderSummary,
+    TokenUsage,
+    ToolDecision,
+    ToolResult,
+)
 
 
 class LLMProvider(Protocol):
@@ -19,7 +25,7 @@ class LLMProvider(Protocol):
 
     def choose_tool(self, query: str, history: list[ConversationTurn], registry) -> ToolDecision: ...
 
-    def summarize(self, query: str, result: ToolResult) -> str: ...
+    def summarize(self, query: str, result: ToolResult) -> ProviderSummary: ...
 
 
 class UnconfiguredProvider:
@@ -32,7 +38,7 @@ class UnconfiguredProvider:
     def choose_tool(self, query: str, history: list[ConversationTurn], registry) -> ToolDecision:
         raise ProviderNotConfigured("LLM provider not configured")
 
-    def summarize(self, query: str, result: ToolResult) -> str:
+    def summarize(self, query: str, result: ToolResult) -> ProviderSummary:
         raise ProviderNotConfigured("LLM provider not configured")
 
 
@@ -46,11 +52,16 @@ class OpenAICompatibleProvider:
         model: str,
         base_url: str | None = None,
         timeout_seconds: float = 30,
+        thinking_mode: str = "disabled",
     ):
         self._api_key = api_key
         self._model_name = model
         self._base_url = base_url or None
         self._timeout_seconds = timeout_seconds
+        normalized_thinking_mode = thinking_mode.strip().lower()
+        if normalized_thinking_mode not in {"enabled", "disabled"}:
+            raise ValueError("LLM_THINKING_MODE must be enabled or disabled")
+        self._thinking_mode = normalized_thinking_mode
 
     @property
     def configured(self) -> bool:
@@ -58,7 +69,11 @@ class OpenAICompatibleProvider:
 
     @property
     def public_info(self) -> dict[str, str]:
-        return {"name": "openai_compatible", "model": self._model_name or "not_configured"}
+        return {
+            "name": "openai_compatible",
+            "model": self._model_name or "not_configured",
+            "thinking_mode": self._thinking_mode,
+        }
 
     def _model(self):
         if not self.configured:
@@ -72,6 +87,7 @@ class OpenAICompatibleProvider:
             timeout=self._timeout_seconds,
             temperature=0,
             max_retries=1,
+            extra_body={"thinking": {"type": self._thinking_mode}},
         )
 
     def choose_tool(self, query: str, history: list[ConversationTurn], registry) -> ToolDecision:
@@ -107,9 +123,13 @@ class OpenAICompatibleProvider:
         if len(calls) != 1:
             raise UnsupportedQuery("the provider did not select exactly one supported analytics tool")
         call = calls[0]
-        return ToolDecision(tool=call["name"], arguments=call.get("args") or {})
+        return ToolDecision(
+            tool=call["name"],
+            arguments=call.get("args") or {},
+            token_usage=self._extract_usage(response),
+        )
 
-    def summarize(self, query: str, result: ToolResult) -> str:
+    def summarize(self, query: str, result: ToolResult) -> ProviderSummary:
         payload = result.model_dump(mode="json")
         try:
             response = self._model().invoke(
@@ -132,7 +152,43 @@ class OpenAICompatibleProvider:
             )
         if not isinstance(content, str) or not content.strip():
             raise ProviderFailure("LLM provider returned an empty response")
-        return content.strip()
+        return ProviderSummary(
+            text=content.strip(),
+            token_usage=self._extract_usage(response),
+        )
+
+    @staticmethod
+    def _extract_usage(response) -> TokenUsage:
+        usage_metadata = getattr(response, "usage_metadata", None) or {}
+        response_metadata = getattr(response, "response_metadata", None) or {}
+        provider_usage = response_metadata.get("token_usage") or {}
+        input_details = usage_metadata.get("input_token_details") or {}
+        input_tokens = int(
+            usage_metadata.get("input_tokens")
+            or provider_usage.get("prompt_tokens")
+            or 0
+        )
+        output_tokens = int(
+            usage_metadata.get("output_tokens")
+            or provider_usage.get("completion_tokens")
+            or 0
+        )
+        total_tokens = int(
+            usage_metadata.get("total_tokens")
+            or provider_usage.get("total_tokens")
+            or input_tokens + output_tokens
+        )
+        return TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_read_tokens=int(
+                input_details.get("cache_read")
+                or provider_usage.get("prompt_cache_hit_tokens")
+                or 0
+            ),
+            cache_miss_tokens=int(provider_usage.get("prompt_cache_miss_tokens") or 0),
+        )
 
     @staticmethod
     def _raise_safe_provider_error(error: Exception):
@@ -207,8 +263,8 @@ class DeterministicTestProvider:
         arguments = {key: value for key, value in arguments.items() if key in allowed_fields}
         return ToolDecision(tool=tool, arguments=arguments)
 
-    def summarize(self, query: str, result: ToolResult) -> str:
-        return compose_deterministic_answer(query, result)
+    def summarize(self, query: str, result: ToolResult) -> ProviderSummary:
+        return ProviderSummary(text=compose_deterministic_answer(query, result))
 
     @staticmethod
     def _is_follow_up(text: str) -> bool:
@@ -340,4 +396,5 @@ def build_provider(config: dict[str, Any]) -> LLMProvider:
         model=model,
         base_url=str(config.get("LLM_BASE_URL", "")) or None,
         timeout_seconds=float(config.get("LLM_TIMEOUT_SECONDS", 30)),
+        thinking_mode=str(config.get("LLM_THINKING_MODE", "disabled")),
     )

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.app.ai.schemas import ChartSpec, DiseaseTopQuery
+from backend.app.ai.schemas import ChartSpec, DiseaseTopQuery, TokenUsage
 
 
 @pytest.mark.parametrize("limit", [0, 51, 1.5, "five"])
@@ -45,3 +45,24 @@ def test_unavailable_chart_cannot_smuggle_data():
                 "message": "unavailable",
             }
         )
+
+
+def test_token_usage_combines_routing_and_summary_without_negative_values():
+    routing = TokenUsage(input_tokens=100, output_tokens=10, total_tokens=110)
+    summary = TokenUsage(
+        input_tokens=200,
+        output_tokens=40,
+        total_tokens=240,
+        cache_read_tokens=80,
+    )
+    combined = routing + summary
+    assert combined.model_dump() == {
+        "input_tokens": 300,
+        "output_tokens": 50,
+        "total_tokens": 350,
+        "cache_read_tokens": 80,
+        "cache_miss_tokens": 0,
+    }
+
+    with pytest.raises(ValidationError):
+        TokenUsage(total_tokens=-1)

@@ -333,24 +333,25 @@ Agent 无权生成或执行任意 SQL，不连接 Shell/HDFS/Hive，不调用任
 
 ### 配置 Provider
 
-默认 Provider 是 `openai_compatible`，可连接 OpenAI-compatible、Qwen 或其他兼容服务：
+默认 Provider 是 `openai_compatible`，可连接 DeepSeek、Qwen 或其他 OpenAI-compatible 服务。DeepSeek V4 Flash 的 non-thinking 配置示例：
 
 ```text
 AI_PROVIDER=openai_compatible
 LLM_API_KEY=replace_locally
-LLM_MODEL=provider_model_name
-LLM_BASE_URL=https://provider-compatible-endpoint/v1
+LLM_MODEL=deepseek-v4-flash
+LLM_BASE_URL=https://api.deepseek.com
 LLM_TIMEOUT_SECONDS=30
+LLM_THINKING_MODE=disabled
 AI_MAX_TURNS=10
 ```
 
-以上值只写入本地 `.env`，禁止提交或记录 Key。`LLM_BASE_URL` 对官方兼容默认端点可留空。Provider 未配置时 `POST /api/ai/query` 返回 HTTP 503，但 MySQL、HDFS、Hive、Spark、Dashboard 和全部普通 analytics API 继续运行。测试专用 `DeterministicTestProvider` 只能通过显式依赖注入或验证脚本使用，生产环境不会自动选择它。
+以上值只写入本地 `.env`，禁止提交或记录 Key。`LLM_THINKING_MODE=disabled` 会在请求体中显式发送 non-thinking 配置；`GET /api/ai/status` 仅返回 Provider 名、model 与 thinking mode，不返回 Key 或 Base URL。Provider 未配置时 `POST /api/ai/query` 返回 HTTP 503，但 MySQL、HDFS、Hive、Spark、Dashboard 和全部普通 analytics API 继续运行。测试专用 `DeterministicTestProvider` 只能通过显式依赖注入或验证脚本使用，生产环境不会自动选择它。
 
 ### 多轮上下文与安全边界
 
 内存版 `ConversationStore` 默认每个会话最多保留 10 轮，仅保存问题、Tool 名、已验证参数和最多 3 行结果摘要，不保存全量数据；接口已抽象，后续可替换 Redis。追问可继承 dimension、metric、top_k、`age_group`、`hospital` 和其他已有 filter。
 
-摘要 Prompt 禁止创造数字/年份、编造医学因果、提供患者个体诊断建议或把住院记录数伪称独立患者人数。`GroundingGuard` 会检查摘要中的数字和年份；若发现 Tool 结果之外的数字，回退到确定性真实数据表述。系统是数据分析与教学演示平台，不是医疗诊断系统。
+摘要 Prompt 禁止创造数字/年份、编造医学因果、提供患者个体诊断建议或把住院记录数伪称独立患者人数。`GroundingGuard` 会检查数字、年份、费用/成本字段标签、分类名称和工具未提供的币种；任何一项不一致都会回退到确定性 Tool Result 表述。响应 meta 分别报告 routing、Tool/MySQL、summary、总耗时与 token usage。系统是数据分析与教学演示平台，不是医疗诊断系统。
 
 请求示例：
 
@@ -390,7 +391,7 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
-当前共 52 个测试，覆盖原 Phase 1/2A 数据与 API 回归，以及 AI Tool allow-list、Pydantic schema/limit/enum、Agent 路由、3 类多轮上下文、GroundingGuard、ChartSpec、防任意 JavaScript、会话上限、Provider 未配置/超时/失败、医学因果边界与个体医疗建议拒绝。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
+当前共 58 个测试，覆盖原 Phase 1/2A 数据与 API 回归，以及 AI Tool allow-list、Pydantic schema/limit/enum、Agent 路由、3 类多轮上下文、GroundingGuard（含费用/成本标签与币种）、token usage、DeepSeek non-thinking 安全状态、ChartSpec、防任意 JavaScript、会话上限、Provider 未配置/超时/失败、医学因果边界与个体医疗建议拒绝。测试 fixture 会显式注入未配置 Provider，不会受开发者本机 API Key 影响。`backend/tests/fixtures/medical_sample.csv` 仅用于自动测试，不会被生产脚本自动发现，也不替代真实数据。
 
 连接真实 MySQL、使用明确标记为测试用途的 deterministic Provider 验证 10 个问题和 3 组追问：
 
@@ -399,6 +400,12 @@ npm run build
 ```
 
 该脚本不调用外部 LLM，也不伪装生产 Provider；它只验证自然语言路由、真实 analytics service 结果、grounding、ChartSpec 与多轮参数继承。HDFS/Hive/Spark 重型回归独立执行 `scripts/bigdata/verify_bigdata.sh`，不放入日常 pytest。
+
+在明确配置真实 DeepSeek Provider 后，可运行包含 10 个问题和 3 组追问的真实验收（会产生外部 API 调用与相应 token 用量）：
+
+```bash
+.venv/bin/python backend/scripts/validate_deepseek_agent.py
+```
 
 ## API 列表
 

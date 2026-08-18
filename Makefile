@@ -1,6 +1,6 @@
 PYTHON ?= .venv/bin/python
 
-.PHONY: setup inspect clean db-up db-init import backend test spark \
+.PHONY: setup inspect clean db-up redis-up db-init import quality ml-train backend test spark \
 	bigdata-start bigdata-upload bigdata-hive bigdata-verify bigdata-stop \
 	frontend-install frontend-build
 
@@ -17,11 +17,20 @@ clean:
 db-up:
 	docker compose up -d mysql
 
+redis-up:
+	docker compose up -d redis
+
 db-init:
 	$(PYTHON) backend/scripts/init_database.py
 
 import:
 	$(PYTHON) backend/scripts/import_data.py
+
+quality:
+	$(PYTHON) backend/scripts/generate_data_quality_metrics.py
+
+ml-train:
+	$(PYTHON) backend/ml/train_cost_model.py
 
 backend:
 	$(PYTHON) backend/run.py

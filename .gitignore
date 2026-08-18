@@ -46,4 +46,7 @@ data/processed/*
 
 # Local import diagnostics
 docs/import_errors*.jsonl
+
+# Locally trained ML binary artifacts (rebuild with the documented training script)
+backend/ml/artifacts/*.joblib
 templates/

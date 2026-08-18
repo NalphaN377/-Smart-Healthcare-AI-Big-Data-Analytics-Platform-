@@ -3,12 +3,13 @@
 
 from .agent import MedicalAnalyticsAgent
 from .provider import build_provider
-from .session import InMemoryConversationStore
+from .session import InMemoryConversationStore, RedisConversationStore
 from .tools import ToolRegistry
 
 __all__ = [
     "InMemoryConversationStore",
     "MedicalAnalyticsAgent",
+    "RedisConversationStore",
     "ToolRegistry",
     "build_provider",
 ]

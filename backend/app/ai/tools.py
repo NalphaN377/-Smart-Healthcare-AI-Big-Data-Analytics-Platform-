@@ -150,11 +150,13 @@ class ToolRegistry:
         started = perf_counter()
         raw_data, extra_meta = definition.handler(query)
         elapsed_ms = max(0, round((perf_counter() - started) * 1000))
+        cache_telemetry = getattr(self.repository, "cache_telemetry", lambda: {})()
         data = to_json_value(raw_data)
         meta = {
             "filters": self._filters(query),
             "count": len(data) if isinstance(data, list) else 1,
             **extra_meta,
+            **cache_telemetry,
         }
         return ToolResult(
             tool=name,

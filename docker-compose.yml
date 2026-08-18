@@ -30,6 +30,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   namenode:
     image: medical-ai-platform-hadoop:3.4.3
     build:
@@ -233,6 +253,7 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:
   namenode_data:
   datanode_data:
   hive_metastore_data:

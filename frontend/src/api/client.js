@@ -1,5 +1,8 @@
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
-const REQUEST_TIMEOUT_MS = 15_000
+// Cold aggregate queries over 2.09M rows can take longer when the dashboard
+// starts several requests concurrently. Redis makes repeat loads fast, while
+// this finite timeout prevents a valid first load from being reported as down.
+const REQUEST_TIMEOUT_MS = 45_000
 
 export class ApiError extends Error {
   constructor(message, status = 0) {

@@ -26,6 +26,6 @@ def yearly_trends():
             "trend_available": trend_available,
             "note": None if trend_available else "数据仅包含一个或零个年份，无法形成有效年度趋势",
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+            **getattr(repository(), "cache_telemetry", lambda: {})(),
         },
     )
-

@@ -16,6 +16,18 @@
 └── .gitignore                   # git 忽略规则
 ```
 
+## 开发环境
+
+使用 Python 3.11，Conda 环境名 `healthcare`：
+
+```bash
+conda create -n healthcare python=3.11 -y
+conda activate healthcare
+pip install -r requirements.txt
+```
+
+新增依赖请指定版本并同步更新 `requirements.txt`。
+
 ## 注意事项
 
 - `data/raw/` 下的原始数据集 **不提交到 git**（794MB 超 GitHub 100MB 单文件限制），已加入 `.gitignore`

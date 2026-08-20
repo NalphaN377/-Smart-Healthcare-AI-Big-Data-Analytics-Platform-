@@ -1,52 +1,48 @@
-# Local configuration and secrets
-.env
-.env.*
-!.env.example
-
 # Python
-.venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+.venv/
+.venv311/
+.python311/
+.downloads/
+.conda-pkgs/
+venv/
+env/
 .pytest_cache/
-.coverage
-htmlcov/
+.mypy_cache/
 
-# Node / Vite
-node_modules/
+# 环境变量（含密钥，勿提交）
+.env
+
+# 数据文件（原始数据集体积大，通常不入库；如用 Git LFS 可单独处理）
+data/raw/*
+data/processed/*
+data/backup/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/backup/.gitkeep
+
+# 前端
+frontend/node_modules/
 frontend/dist/
-*.tsbuildinfo
+frontend/*.png
+frontend/.npm-cache/
+.edge-test-profile*/
 
-# macOS, editors and logs
-.DS_Store
-*.log
-*.tmp
-*.lock
-~$*
-*.textClipping
-.claude/
+# 模板（参考样板，不入库；填写后的成品放到 docs/）
+templates/
+
+# IDE / 系统
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
 
-# Spark/Hadoop local state
-spark-warehouse/
-.sparkStaging/
-metastore_db/
-derby.log
+# 日志
+logs/
+*.log
 
-# Medical datasets and generated analytics (never commit patient-level data)
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-!data/README.md
-
-# The user-provided SPARCS dataset is nested outside data/raw.
-/009 医养项目数据/
-**/Hospital_Inpatient_Discharges__SPARCS_De-Identified__*.csv
-
-# Local import diagnostics
-docs/import_errors*.jsonl
-
-# Locally trained ML binary artifacts (rebuild with the documented training script)
-backend/ml/artifacts/*.joblib
-templates/
+# 本地测试 / 覆盖率
+.coverage
+htmlcov/

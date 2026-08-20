@@ -1,2 +1,0 @@
-# Only install this when spark-submit is not already available on the machine.
-pyspark>=4.1,<5

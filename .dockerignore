@@ -1,6 +1,0 @@
-**
-!docker/
-!docker/**
-!spark/
-!spark/jobs/
-!spark/jobs/*.py

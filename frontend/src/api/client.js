@@ -1,66 +1,78 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
-// Cold aggregate queries over 2.09M rows can take longer when the dashboard
-// starts several requests concurrently. Redis makes repeat loads fast, while
-// this finite timeout prevents a valid first load from being reported as down.
-const REQUEST_TIMEOUT_MS = 45_000
+const BASE = '/api'
 
-export class ApiError extends Error {
-  constructor(message, status = 0) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
-
-export async function get(path, params = {}) {
-  const query = new URLSearchParams()
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') query.set(key, String(value))
+async function request(url, options = {}) {
+  const response = await fetch(BASE + url, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
   })
-  const suffix = query.size ? `?${query.toString()}` : ''
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}${suffix}`, {
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok || !payload?.success) {
-      throw new ApiError(payload?.message || `请求失败（HTTP ${response.status}）`, response.status)
-    }
-    return payload
-  } catch (error) {
-    if (error.name === 'AbortError') throw new ApiError('请求超时，请检查后端服务')
-    if (error instanceof ApiError) throw error
-    throw new ApiError('无法连接分析服务，请确认 Flask 后端已启动')
-  } finally {
-    window.clearTimeout(timeout)
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || !payload || payload.code !== 0) {
+    throw new Error(payload?.message || `请求失败 (${response.status})`)
   }
+  return payload
 }
 
-export async function post(path, body, options = {}) {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs || REQUEST_TIMEOUT_MS)
+function queryString(params = {}) {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') search.set(key, String(value))
+  })
+  const text = search.toString()
+  return text ? `?${text}` : ''
+}
 
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
+export function health() { return request('/health') }
+export function metadata() { return request('/metadata') }
+export function overview(filters = {}) { return request(`/overview${queryString(filters)}`) }
+export function dataQuality() { return request('/data-quality') }
+export function yearTrend(filters = {}) { return request(`/year_trend${queryString(filters)}`) }
+export function paymentRatio(filters = {}) { return request(`/payment_ratio${queryString(filters)}`) }
+export function dimensionValues(dimension, limit = 100) { return request(`/dimensions/${dimension}/values?limit=${limit}`) }
+
+export function aggregate(dimension, metrics, limit = 20, filters = {}) {
+  return request(`/aggregate${queryString({ dimension, metrics, limit, ...filters })}`)
+}
+
+export function chat(query) {
+  return request('/chat', { method: 'POST', body: JSON.stringify({ query }) })
+}
+
+export function createReport(payload = {}) {
+  return request('/reports', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/** 读取 Flask SSE 流。callbacks: context / delta / done / error */
+export async function streamChat(query, callbacks = {}) {
+  const response = await fetch(`${BASE}/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ query }),
+  })
+  if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => null)
-    if (!response.ok || !payload?.success) {
-      throw new ApiError(payload?.message || `请求失败（HTTP ${response.status}）`, response.status)
+    throw new Error(payload?.message || `流式请求失败 (${response.status})`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() || ''
+    for (const block of blocks) {
+      let eventName = 'message'
+      let data = ''
+      block.split(/\r?\n/).forEach((line) => {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim()
+        if (line.startsWith('data:')) data += line.slice(5).trim()
+      })
+      if (!data) continue
+      const payload = JSON.parse(data)
+      callbacks[eventName]?.(payload)
+      if (eventName === 'error') throw new Error(payload.message || 'AI 流式生成中断')
     }
-    return payload
-  } catch (error) {
-    if (error.name === 'AbortError') throw new ApiError('AI 分析超时，请稍后重试', 504)
-    if (error instanceof ApiError) throw error
-    throw new ApiError('无法连接分析服务，请确认 Flask 后端已启动')
-  } finally {
-    window.clearTimeout(timeout)
+    if (done) break
   }
 }

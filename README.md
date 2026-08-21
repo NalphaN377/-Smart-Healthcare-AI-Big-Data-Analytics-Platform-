@@ -32,20 +32,22 @@ tests/                            单元、API 与真实数据库集成测试
 
 ### 1. 后端环境
 
-项目统一使用 Python 3.11（当前验证版本为 3.11.9）。
+项目统一使用 Python 3.11，开发环境由 conda 环境 `hwadee` 管理（Python 3.11.15 + 全部依赖已就绪）。
 
 ```powershell
-py -3.11 -m venv .venv311
-.\.venv311\Scripts\Activate.ps1
+conda activate hwadee
+Copy-Item .env.example .env   # 首次使用，随后填写本机密码与密钥
+```
+
+如 `hwadee` 环境缺失或需重建：
+
+```powershell
+conda create -n hwadee python=3.11 -y
+conda activate hwadee
 pip install -r requirements.txt
-Copy-Item .env.example .env
 ```
 
-当前工作区已提供项目内 Python 3.11.9；如本机未注册 `py -3.11`，可直接使用：
-
-```powershell
-.\.python311\python.exe -m venv .venv311
-```
+> 后文命令均假设已 `conda activate hwadee`；未激活时把 `python` 换成 `conda run -n hwadee python`。PyCharm 解释器选 `E:\support\Anaconda3\envs\hwadee\python.exe`。
 
 编辑 `.env`，至少填写：
 
@@ -65,7 +67,7 @@ DEEPSEEK_API_KEY=你的密钥
 创建空数据库 `yiliaoBigData` 后，可执行高速导入。脚本会初始化 Schema、BULK INSERT 到 staging 表、清洗转换、去重并记录质量审计。
 
 ```powershell
-.\.venv311\Scripts\python.exe scripts\bulk_ingest_sqlserver.py `
+python scripts\bulk_ingest_sqlserver.py `
   --file "..\data\Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv" `
   --truncate
 ```
@@ -73,7 +75,7 @@ DEEPSEEK_API_KEY=你的密钥
 小文件或非 SQL Server 原生导入场景也可使用：
 
 ```powershell
-.\.venv311\Scripts\python.exe scripts\ingest.py --file "..\data\your_file.csv" --init-schema
+python scripts\ingest.py --file "..\data\your_file.csv" --init-schema
 ```
 
 `--truncate` 会清空业务表，仅在明确需要重新全量导入时使用。
@@ -83,7 +85,7 @@ DEEPSEEK_API_KEY=你的密钥
 终端一：
 
 ```powershell
-.\.venv311\Scripts\python.exe run.py
+python run.py
 ```
 
 终端二：
@@ -120,14 +122,14 @@ npm run dev
 单元与 API 回归：
 
 ```powershell
-.\.venv311\Scripts\python.exe -m pytest -m "not integration" --cov=app
+python -m pytest -m "not integration" --cov=app
 ```
 
 真实 SQL Server 集成测试：
 
 ```powershell
 $env:RUN_DB_TESTS="1"
-.\.venv311\Scripts\python.exe -m pytest tests\test_integration_sqlserver.py -v
+python -m pytest tests\test_integration_sqlserver.py -v
 ```
 
 前端生产构建：

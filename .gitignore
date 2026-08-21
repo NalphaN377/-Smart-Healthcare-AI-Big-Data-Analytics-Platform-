@@ -46,3 +46,5 @@ logs/
 # 本地测试 / 覆盖率
 .coverage
 htmlcov/
+
+CLAUDE.md

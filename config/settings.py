@@ -21,7 +21,7 @@ DATA_DIR = BASE_DIR / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 BACKUP_DIR = DATA_DIR / "backup"
-DEFAULT_SOURCE_DATA = BASE_DIR.parent / "data" / "Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv"
+DEFAULT_SOURCE_DATA = BASE_DIR / "data" / "raw" / "Hospital_Inpatient_Discharges__SPARCS_De-Identified___2021_20231012.csv"
 
 
 def _bool_env(name: str, default: bool = False) -> bool:

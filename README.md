@@ -47,7 +47,28 @@ conda activate hwadee
 pip install -r requirements.txt
 ```
 
-> 后文命令均假设已 `conda activate hwadee`；未激活时把 `python` 换成 `conda run -n hwadee python`。PyCharm 解释器选 `E:\support\Anaconda3\envs\hwadee\python.exe`。
+> 后文命令均假设已 `conda activate hwadee`；未激活时把 `python` 换成 `conda run -n hwadee python`。PyCharm 解释器请选本机 `hwadee` 环境下的 `python.exe`，路径用 `conda env list` 查看（例如 `E:\support\Anaconda3\envs\hwadee\python.exe`，各人机器不同）。
+
+### 1.1 Spark 环境（仅运行 `scripts/spark_etl.py` 需要）
+
+`pyspark` 已在 `requirements.txt` 中，但 Spark 在 Windows 上还需要 JDK 17 和 winutils，
+否则会报 `UnsatisfiedLinkError: NativeIO$Windows.access0` 或 Python worker `Connection reset`。
+
+```powershell
+scoop install java/openjdk17 versions/hadoop-winutils33
+```
+
+然后设置以下用户环境变量（路径按本机实际安装位置调整）：
+
+| 变量 | 值 | 作用 |
+|---|---|---|
+| `SPARK_JAVA_HOME` | JDK 17 根目录 | Spark 不支持 JDK 22+，脚本据此自动切换 |
+| `HADOOP_HOME` | winutils 安装根目录 | 提供 `winutils.exe` 与 `hadoop.dll` |
+| `PYSPARK_PYTHON` | `hwadee` 环境的 `python.exe` | 否则 JVM 会用 PATH 上的其它 Python 启动 worker 并崩溃 |
+| `PYSPARK_DRIVER_PYTHON` | 同上 | 同上 |
+
+还需确保 `%HADOOP_HOME%\bin`（含 `winutils.exe` 和 `hadoop.dll`）在 `PATH` 上，
+否则 `hadoop.dll` 加载不到，`NativeCodeLoader.isNativeCodeLoaded()` 为 `false`，Parquet 写入会失败。
 
 编辑 `.env`，至少填写：
 

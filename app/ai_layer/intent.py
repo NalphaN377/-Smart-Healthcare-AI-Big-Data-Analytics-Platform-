@@ -28,6 +28,20 @@ DIMENSION_KEYWORDS = {
     "severity": ["严重程度", "病情严重", "病情等级", "严重等级"],
     "mortality_risk": ["死亡风险", "死亡危险", "病死风险"],
     "disposition": ["离院去向", "出院去向", "出院后去向", "转归"],
+    "procedure": ["手术", "操作", "诊疗路径", "治疗路径", "主要手术"],
+    "procedure_code": ["手术编码", "操作编码", "CCSR手术"],
+    "race": ["种族", "人种"],
+    "ethnicity": ["族裔", "民族背景"],
+    "zip_area": ["邮编", "邮政区域"],
+    "ed_indicator": ["急诊来源", "急诊标志", "急诊科"],
+    "medical_surgical": ["医疗手术类型", "内外科", "医疗类", "手术类"],
+    "apr_drg": ["APR DRG", "DRG分组", "DRG"],
+    "apr_drg_code": ["DRG编码", "APR DRG编码"],
+    "apr_mdc": ["APR MDC", "MDC类别", "主要疾病类别"],
+    "apr_mdc_code": ["MDC编码", "APR MDC编码"],
+    "payment_secondary": ["第二支付方式", "次要支付方式"],
+    "payment_tertiary": ["第三支付方式"],
+    "birth_weight_group": ["出生体重", "新生儿体重", "低出生体重"],
 }
 
 METRIC_KEYWORDS = {
@@ -37,6 +51,38 @@ METRIC_KEYWORDS = {
     "avg_total_costs": ["平均成本", "次均成本", "成本", "成本最高"],
     "sum_total_costs": ["总成本", "成本总额", "累计成本"],
     "count": ["数量", "人数", "人次", "住院量", "出院量", "例数", "病例数", "多少", "最多", "最少", "占比", "比例", "构成", "分布"],
+    "record_share": ["记录占比", "病例占比", "构成比"],
+    "charge_cost_spread": ["收费成本差额", "收费与成本差额", "账单成本差"],
+    "charge_cost_spread_ratio": ["收费成本差额率", "账单成本差额率", "代理利润率", "利润率"],
+    "cost_to_charge_ratio": ["成本收费比", "成本费用比"],
+    "charge_to_cost_multiple": ["收费成本倍数", "账单成本倍数"],
+    "charges_per_day": ["每日收费", "每住院日收费", "日均费用"],
+    "costs_per_day": ["每日成本", "每住院日成本", "日均成本"],
+    "procedure_rate": ["手术率", "操作率", "手术记录率"],
+    "ed_rate": ["急诊来源占比", "急诊率", "ED占比"],
+    "emergency_admission_rate": ["急诊入院占比", "急诊入院率"],
+    "surgical_rate": ["手术类病例占比", "手术病例率"],
+    "long_stay_rate": ["长期住院占比", "超长住院率", "30天以上"],
+    "expired_disposition_rate": ["院内死亡占比", "死亡去向占比", "粗死亡率"],
+    "cost_above_charge_rate": ["成本高于收费占比", "成本倒挂率"],
+    "avg_birth_weight": ["平均出生体重"],
+    "low_birth_weight_rate": ["低出生体重占比", "低体重儿比例"],
+}
+
+TOPIC_KEYWORDS = {
+    "growth_ranking": ["增长最快", "增长最多", "增速最快", "增长率最高", "增长幅度最大"],
+    "disease_trend": ["疾病趋势", "病种趋势", "疾病负担"],
+    "complexity": ["病例复杂度", "病例组合", "严重程度资源"],
+    "hospital_benchmark": ["病例组合校正", "医院成本指数", "医院效率指数", "校正后医院"],
+    "pathway": ["诊疗路径", "疾病手术路径", "手术路径"],
+    "emergency": ["急诊路径", "急诊和入院", "急诊分析"],
+    "outcome": ["出院结局", "结局分析", "风险分层"],
+    "payment": ["支付结构", "支付方式分析", "支付趋势"],
+    "demographic": ["人口结构", "健康差异", "人群差异"],
+    "maternal_newborn": ["妇产", "新生儿", "出生体重分析"],
+    "operations": ["区域运营", "医院运营", "服务区域分析"],
+    "regional_concentration": ["医院集中度", "区域集中度", "HHI"],
+    "data_quality": ["数据质量", "异常检测", "标签漂移", "字段完整率"],
 }
 
 CHART_KEYWORDS = {
@@ -48,11 +94,18 @@ CHART_KEYWORDS = {
 ALLOWED_DIMENSIONS = frozenset(DIMENSION_KEYWORDS)
 ALLOWED_METRICS = frozenset(METRIC_KEYWORDS)
 ALLOWED_CHART_TYPES = {"bar", "pie", "line"}
-ALLOWED_FILTERS = {"year", "hospital", "county", "service_area", "gender"}
+ALLOWED_FILTERS = frozenset({"year", "year_from", "year_to", *DIMENSION_KEYWORDS})
+ALLOWED_TOPICS = frozenset(TOPIC_KEYWORDS)
+RATE_METRICS = frozenset({
+    "record_share", "charge_cost_spread_ratio", "cost_to_charge_ratio",
+    "procedure_rate", "ed_rate", "emergency_admission_rate", "surgical_rate",
+    "long_stay_rate", "expired_disposition_rate", "cost_above_charge_rate",
+    "low_birth_weight_rate",
+})
 
 DATA_TERMS = (
     "住院", "出院", "患者", "病人", "疾病", "病种", "诊断", "医院", "医疗机构", "费用", "收费",
-    "成本", "年龄", "性别", "医保", "支付", "保险", "入院", "死亡风险", "离院", "医疗数据", "记录",
+    "成本", "利润", "差额", "年龄", "性别", "医保", "支付", "保险", "入院", "死亡风险", "离院", "医疗数据", "记录",
 )
 ANALYSIS_TERMS = (
     "多少", "哪些", "哪个", "哪类", "哪种", "最高", "最低", "最多", "最少", "平均", "总计", "合计",
@@ -109,6 +162,11 @@ def detect_chart_type(query: str, metrics: List[str]) -> str:
     return "bar"
 
 
+def detect_topic(query: str) -> str | None:
+    matches = _matched_keys(query, TOPIC_KEYWORDS)
+    return matches[0][0] if matches else None
+
+
 def _top_limit(query: str) -> int:
     match = re.search(r"(?:top|前)\s*([一二两三四五六七八九十\d]{1,3})", query, flags=re.I)
     if not match:
@@ -124,6 +182,38 @@ def _top_limit(query: str) -> int:
     else:
         value = 20
     return min(max(value, 1), 50)
+
+
+def _year_filters(query: str) -> dict:
+    """提取单年份或显式年份范围；范围问题不能退化成首年等值过滤。"""
+    years = [int(value) for value in re.findall(r"(?:19|20)\d{2}", query)]
+    range_match = re.search(
+        r"((?:19|20)\d{2})\s*(?:年)?\s*(?:到|至|—|–|-|~|～)\s*((?:19|20)\d{2})",
+        query,
+    )
+    if range_match:
+        start, end = (int(range_match.group(1)), int(range_match.group(2)))
+        return {"year_from": min(start, end), "year_to": max(start, end)}
+    if len(years) == 1:
+        return {"year": years[0]}
+    return {}
+
+
+def _disease_filters(query: str) -> dict:
+    """提取用户明示指定的英文疾病名称。
+
+    例如“Septicemia类疾病”必须变成疾病筛选，不能对全部疾病做排名。
+    中文疾病名容易与问句助词混淆，交由白名单校验后的LLM结果处理。
+    """
+    match = re.search(
+        r"([A-Za-z][A-Za-z0-9 _/&,'().\-]{1,100}?)\s*(?:类疾病|疾病|患者|病例)",
+        query,
+        flags=re.I,
+    )
+    if not match:
+        return {}
+    value = re.sub(r"\s+", " ", match.group(1)).strip(" ,.;:")
+    return {"disease": value} if value else {}
 
 
 def _message(status: str, reason: str = "") -> str:
@@ -161,6 +251,7 @@ def _base_intent(query: str, status: str, confidence: float, **extra) -> dict:
         "confidence": round(max(0.0, min(float(confidence), 1.0)), 2),
         "message": extra.get("message", ""),
         "source": extra.get("source", "rules"),
+        "topic": extra.get("topic"),
     }
 
 
@@ -174,8 +265,31 @@ def detect_intent(query: str) -> dict:
     if GREETING_PATTERN.match(query):
         return _base_intent(query, "clarification", 0.95, message=_message("clarification", "greeting"))
 
+    topic = detect_topic(query)
+    if topic:
+        if topic == "growth_ranking":
+            dimension = detect_dimension(query)
+            metrics = detect_metrics(query)
+            if not dimension or not metrics:
+                return _base_intent(
+                    query, "clarification", 0.6, topic=topic, dimension=dimension,
+                    metrics=metrics, message="请补充需要比较的对象和增长指标，例如“哪些疾病的总成本增长最快”。",
+                )
+            return _base_intent(
+                query, "ready", 0.94, topic=topic, dimension=dimension,
+                metrics=metrics, chart_type="bar", filters=_year_filters(query),
+                sort_by="growth_pct", sort_order="desc", message="",
+            )
+        return _base_intent(
+            query, "ready", 0.92, topic=topic, chart_type="line" if topic != "hospital_benchmark" else "bar",
+            filters=_year_filters(query), message="",
+        )
+
     dimension = detect_dimension(query)
     metrics = detect_metrics(query)
+    primary_rate = next((metric for metric in metrics if metric in RATE_METRICS), None)
+    if primary_rate and "count" not in metrics:
+        metrics.append("count")
     has_domain = _contains_any(query, DATA_TERMS)
     has_analysis = _contains_any(query, ANALYSIS_TERMS)
     if not has_domain or (not dimension and not metrics and not has_analysis):
@@ -203,10 +317,9 @@ def detect_intent(query: str) -> dict:
     if not dimension or not metrics:
         return _base_intent(query, "clarification", 0.35, message=_message("clarification"))
 
-    year_match = re.search(r"(?:19|20)\d{2}", query)
     limit = _top_limit(query)
-    filters = {"year": int(year_match.group())} if year_match else {}
-    sort_by = metrics[0] if _contains_any(query, ("最高", "最低", "最多", "最少", "最长", "最短", "排名", "排行", "排序", "排一下", "从高到低", "从低到高", "top", "前")) else None
+    filters = {**_year_filters(query), **_disease_filters(query)}
+    sort_by = primary_rate or (metrics[0] if _contains_any(query, ("最高", "最低", "最多", "最少", "最长", "最短", "排名", "排行", "排序", "排一下", "从高到低", "从低到高", "top", "前")) else None)
     sort_order = "asc" if _contains_any(query, ("最低", "最少", "最短", "从低到高", "升序")) else "desc"
     chart_type = detect_chart_type(query, metrics)
     if chart_type == "line" and dimension != "year" and "折线图" not in query:
@@ -227,14 +340,17 @@ def detect_intent(query: str) -> dict:
     return intent
 
 
-LLM_INTENT_SYSTEM_PROMPT = """你是医疗数据分析意图路由器，只输出一个 JSON 对象，不要输出解释或 Markdown。
-可用数据仅为脱敏住院出院记录；可分析：疾病、疾病编码、年龄组、医院、县、服务区域、年份、支付方式、性别、入院类型、严重程度、死亡风险、离院去向。
-dimension 仅可为：disease,disease_code,age_group,hospital,county,service_area,year,payment,gender,admission_type,severity,mortality_risk,disposition。
-metrics 仅可为：count,avg_length_of_stay,avg_total_charges,sum_total_charges,avg_total_costs,sum_total_costs。
-chart_type 仅可为 bar,pie,line。filters 仅允许 year,hospital,county,service_area,gender。
+LLM_INTENT_SYSTEM_PROMPT = f"""你是医疗数据分析意图路由器，只输出一个 JSON 对象，不要输出解释或 Markdown。
+可用数据仅为2021—2024年SPARCS脱敏住院出院记录。
+dimension 仅可为：{','.join(sorted(ALLOWED_DIMENSIONS))}。
+metrics 仅可为：{','.join(sorted(ALLOWED_METRICS))}。
+topic 仅可为：{','.join(sorted(ALLOWED_TOPICS))}；专题问题可只返回topic，不强制dimension和metrics。
+chart_type 仅可为 bar,pie,line。filters 仅允许：{','.join(sorted(ALLOWED_FILTERS))}。
 status 仅可为 ready,clarification,unsupported。个人诊断、症状、治疗、处方问题必须 unsupported；不属于上述数据范围的问题必须 unsupported。
 只有维度和指标都明确时才 ready；不要猜测缺失信息。自然同义表达要按语义理解，例如“住得最久”是 avg_length_of_stay，“最常见”是 count，“多少钱”是 avg_total_charges。
-JSON 字段固定为 status,dimension,metrics,chart_type,limit,filters,sort_by,sort_order,confidence,message。
+filters 中单年份使用 year；年份范围使用 year_from 和 year_to，例如“2021到2024年”必须输出 {{"year_from":2021,"year_to":2024}}，不能退化成 year=2021。
+用户明确点名某种疾病时，filters 必须使用 disease 保留该疾病名，例如“Septicemia类疾病需要住多久”要输出 {{"disease":"Septicemia"}}。
+JSON 字段固定为 status,topic,dimension,metrics,chart_type,limit,filters,sort_by,sort_order,confidence,message。
 排名问题的 sort_by 必须是 metrics 中的指标，sort_order 仅为 asc 或 desc；confidence 为 0 到 1；非 ready 时用 message 给出简短中文引导。"""
 
 
@@ -266,6 +382,7 @@ def _validated_llm_intent(query: str, raw: dict) -> dict:
     if status not in {"ready", "clarification", "unsupported"}:
         status = "clarification"
     dimension = raw.get("dimension") if raw.get("dimension") in ALLOWED_DIMENSIONS else None
+    topic = raw.get("topic") if raw.get("topic") in ALLOWED_TOPICS else detect_topic(query)
     metrics = [item for item in (raw.get("metrics") or []) if item in ALLOWED_METRICS]
     metrics = list(dict.fromkeys(metrics))[:4]
     chart_type = raw.get("chart_type") if raw.get("chart_type") in ALLOWED_CHART_TYPES else "bar"
@@ -276,11 +393,26 @@ def _validated_llm_intent(query: str, raw: dict) -> dict:
     except (TypeError, ValueError):
         limit = 20
     filters = {key: value for key, value in (raw.get("filters") or {}).items() if key in ALLOWED_FILTERS and value not in (None, "")}
-    if "year" in filters:
+    for year_key in ("year", "year_from", "year_to"):
+        if year_key not in filters:
+            continue
         try:
-            filters["year"] = int(filters["year"])
+            filters[year_key] = int(filters[year_key])
         except (TypeError, ValueError):
-            filters.pop("year")
+            filters.pop(year_key)
+    if "year_from" in filters and "year_to" in filters:
+        start, end = filters["year_from"], filters["year_to"]
+        filters["year_from"], filters["year_to"] = min(start, end), max(start, end)
+        filters.pop("year", None)
+    # 显式写在当前问题里的年份范围是硬约束。即使外部模型只返回了首年，
+    # 也要用本地确定性解析结果覆盖，避免“2021到2024”退化为 year=2021。
+    explicit_years = _year_filters(query)
+    if "year_from" in explicit_years:
+        filters.update(explicit_years)
+        filters.pop("year", None)
+    explicit_disease = _disease_filters(query)
+    if explicit_disease:
+        filters.update(explicit_disease)
     try:
         confidence = float(raw.get("confidence", 0.5))
     except (TypeError, ValueError):
@@ -288,7 +420,7 @@ def _validated_llm_intent(query: str, raw: dict) -> dict:
     sort_by = raw.get("sort_by") if raw.get("sort_by") in metrics else None
     sort_order = raw.get("sort_order") if raw.get("sort_order") in {"asc", "desc"} else "desc"
 
-    if status == "ready" and (not dimension or not metrics or confidence < 0.55):
+    if status == "ready" and (not topic and (not dimension or not metrics) or confidence < 0.55):
         status = "clarification"
     message = str(raw.get("message") or "").strip()[:300]
     if status != "ready" and not message:
@@ -296,13 +428,19 @@ def _validated_llm_intent(query: str, raw: dict) -> dict:
     return _base_intent(
         query, status, confidence, dimension=dimension, metrics=metrics, chart_type=chart_type,
         limit=limit, filters=filters, sort_by=sort_by, sort_order=sort_order, message=message, source="llm",
+        topic=topic,
     )
 
 
 def detect_intent_with_llm(query: str, history: list[dict] | None = None) -> dict:
     """使用大模型理解自然语言并强制白名单校验，异常时回退到本地规则。"""
+    # 明确命中受控规则的问题直接执行。外部模型只负责补足规则无法确定的语义，
+    # 不能把已确定的SQL分析意图降级成知识库回答或澄清问题。
+    rule_intent = detect_intent(query)
+    if rule_intent.get("status") == "ready":
+        return rule_intent
     if not LLM_CONFIG.get("api_key"):
-        return detect_intent(query)
+        return rule_intent
     try:
         from anthropic import Anthropic
 
@@ -321,4 +459,4 @@ def detect_intent_with_llm(query: str, history: list[dict] | None = None) -> dic
         return intent
     except Exception as exc:  # 外部模型故障不能阻断基础数据查询
         logger.warning("LLM 意图识别失败，回退到本地规则: %s", exc.__class__.__name__)
-        return detect_intent(query)
+        return rule_intent

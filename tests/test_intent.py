@@ -2,7 +2,7 @@
 
 运行：pytest tests/test_intent.py
 """
-from app.ai_layer.intent import _validated_llm_intent, detect_intent
+from app.ai_layer.intent import _validated_llm_intent, detect_intent, detect_intent_with_llm
 
 
 def test_detect_intent_age_group():
@@ -22,6 +22,27 @@ def test_detect_intent_year_trend():
     intent = detect_intent("各年份住院量的变化趋势")
     assert intent["dimension"] == "year"
     assert intent["chart_type"] == "line"
+
+
+def test_year_range_is_not_reduced_to_first_year():
+    intent = detect_intent("2021到2024年出院人数趋势")
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "year"
+    assert intent["metrics"] == ["count"]
+    assert intent["filters"] == {"year_from": 2021, "year_to": 2024}
+
+
+def test_reversed_year_range_is_normalized():
+    intent = detect_intent("2024至2022年住院量变化")
+    assert intent["filters"] == {"year_from": 2022, "year_to": 2024}
+
+
+def test_named_disease_is_used_as_filter_instead_of_global_ranking():
+    intent = detect_intent("Septicemia类疾病，需要住多久医院？")
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "disease"
+    assert intent["metrics"] == ["avg_length_of_stay"]
+    assert intent["filters"] == {"disease": "Septicemia"}
 
 
 def test_natural_language_synonyms_are_understood():
@@ -81,3 +102,62 @@ def test_llm_result_is_whitelist_validated():
     assert intent["metrics"] == ["avg_total_charges"]
     assert intent["filters"] == {"year": 2021}
     assert intent["chart_requested"] is False
+
+
+def test_llm_year_range_is_whitelist_validated():
+    intent = _validated_llm_intent("2021到2024年出院人数趋势", {
+        "status": "ready", "dimension": "year", "metrics": ["count"], "chart_type": "line",
+        "filters": {"year": 2021, "year_from": "2021", "year_to": "2024"},
+        "confidence": 0.99,
+    })
+    assert intent["filters"] == {"year_from": 2021, "year_to": 2024}
+
+
+def test_explicit_query_range_overrides_llm_single_year_mistake():
+    intent = _validated_llm_intent("2021到2024年出院人数趋势", {
+        "status": "ready", "dimension": "year", "metrics": ["count"], "chart_type": "line",
+        "filters": {"year": 2021}, "confidence": 0.99,
+    })
+    assert intent["filters"] == {"year_from": 2021, "year_to": 2024}
+
+
+def test_explicit_disease_overrides_missing_llm_filter():
+    intent = _validated_llm_intent("Septicemia类疾病，需要住多久医院？", {
+        "status": "ready", "dimension": "disease", "metrics": ["avg_length_of_stay"],
+        "chart_type": "bar", "filters": {}, "confidence": 0.99,
+    })
+    assert intent["filters"] == {"disease": "Septicemia"}
+
+
+def test_financial_proxy_metric_is_recognized_but_not_called_real_profit():
+    intent = detect_intent("按年度分析利润率")
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "year"
+    assert "charge_cost_spread_ratio" in intent["metrics"]
+
+
+def test_specialized_analysis_topics_are_recognized():
+    assert detect_intent("做病例组合校正后的医院成本比较")["topic"] == "hospital_benchmark"
+    assert detect_intent("检查四年数据质量和异常")["topic"] == "data_quality"
+    assert detect_intent("分析新生儿出生体重")["topic"] == "maternal_newborn"
+
+
+def test_growth_question_routes_to_cross_year_growth_analysis():
+    intent = detect_intent("哪些疾病带来的总成本增长最快？")
+    assert intent["status"] == "ready"
+    assert intent["topic"] == "growth_ranking"
+    assert intent["dimension"] == "disease"
+    assert intent["metrics"] == ["sum_total_costs"]
+    assert intent["sort_by"] == "growth_pct"
+
+
+def test_clear_rule_intent_is_not_downgraded_by_external_llm(monkeypatch):
+    from app.ai_layer import intent as intent_module
+
+    monkeypatch.setitem(intent_module.LLM_CONFIG, "api_key", "should-not-be-used")
+    result = detect_intent_with_llm("不同医院的急诊率如何？")
+    assert result["status"] == "ready"
+    assert result["dimension"] == "hospital"
+    assert result["metrics"] == ["ed_rate", "count"]
+    assert result["sort_by"] == "ed_rate"
+    assert result["source"] == "rules"

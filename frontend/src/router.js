@@ -8,6 +8,7 @@ import LoginView from './views/LoginView.vue'
 import PublicReports from './views/PublicReports.vue'
 import RegisterView from './views/RegisterView.vue'
 import AccountSettings from './views/AccountSettings.vue'
+import NotificationsView from './views/NotificationsView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
@@ -21,6 +22,7 @@ const routes = [
   { path: '/patients', name: 'patients', component: DashboardApp, meta: { permission: 'patient_profile:read' } },
   { path: '/reports', name: 'reports', component: DashboardApp, meta: { permission: 'report:generate' } },
   { path: '/public-reports', name: 'public-reports', component: PublicReports, meta: { permission: 'report:public:read' } },
+  { path: '/notifications', name: 'notifications', component: NotificationsView },
   { path: '/admin/users', name: 'admin-users', component: AdminUsers, meta: { permission: 'user:manage' } },
   { path: '/admin/system', name: 'admin-system', component: AdminSystem, meta: { permission: 'system:manage' } },
   { path: '/', redirect: '/overview' },

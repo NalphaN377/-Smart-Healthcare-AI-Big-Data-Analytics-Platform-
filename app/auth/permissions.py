@@ -30,6 +30,9 @@ ROLE_PERMISSIONS = {
         "user:manage",
         "system:manage",
         "audit:read",
+        "analytics:financial",
+        "analytics:data_quality",
+        "analytics:facility_benchmark",
     },
 }
 

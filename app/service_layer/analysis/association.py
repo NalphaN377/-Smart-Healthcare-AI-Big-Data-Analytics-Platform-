@@ -14,16 +14,29 @@ STAT_TABLE = "dbo.disease_procedure_stat"
 
 def _validate_filters(filters: dict | None) -> tuple[str, list]:
     filters = filters or {}
-    unsupported = sorted(set(filters) - {"year"})
+    unsupported = sorted(set(filters) - {"year", "year_from", "year_to", "disease", "disease_code", "procedure_code"})
     if unsupported:
         raise ValueError(f"关联预聚合当前仅支持 year 筛选，不支持: {unsupported}")
-    if filters.get("year") in (None, ""):
-        return "", []
-    try:
-        year = int(filters["year"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError("筛选项 year 的值不合法") from exc
-    return f" WHERE discharge_year={storage.PARAM}", [year]
+    clauses, params = [], []
+    operators = {"year": "=", "year_from": ">=", "year_to": "<="}
+    for key, operator in operators.items():
+        if filters.get(key) in (None, ""):
+            continue
+        try:
+            params.append(int(filters[key]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"筛选项 {key} 的值不合法") from exc
+        clauses.append(f"discharge_year{operator}{storage.PARAM}")
+    if filters.get("disease") not in (None, ""):
+        clauses.append(f"UPPER(diagnosis_description)={storage.PARAM}")
+        params.append(str(filters["disease"]).strip().upper())
+    if filters.get("disease_code") not in (None, ""):
+        clauses.append(f"diagnosis_code={storage.PARAM}")
+        params.append(str(filters["disease_code"]).strip())
+    if filters.get("procedure_code") not in (None, ""):
+        clauses.append(f"procedure_code={storage.PARAM}")
+        params.append(str(filters["procedure_code"]).strip())
+    return (" WHERE " + " AND ".join(clauses), params) if clauses else ("", [])
 
 
 def refresh_association_stats() -> dict:

@@ -6,33 +6,24 @@
 """
 import logging
 
+from app.service_layer.analysis import registry
+
 logger = logging.getLogger(__name__)
 
 # 支持的图表类型
 CHART_TYPES = ("bar", "pie", "line")
 
 # 指标中文标签（用于图表标题/坐标轴）
-METRIC_LABELS = {
-    "count": "住院量",
-    "avg_length_of_stay": "平均住院时长(天)",
-    "avg_total_charges": "平均费用",
-    "sum_total_charges": "总费用",
-    "avg_total_costs": "平均成本",
-    "sum_total_costs": "总成本",
-}
+METRIC_LABELS = {key: spec.label for key, spec in registry.METRICS.items()}
+METRIC_LABELS.update({
+    "case_mix_cost_index": "病例组合校正成本指数",
+    "case_mix_los_index": "病例组合校正住院日指数",
+    "hhi": "医院集中度HHI",
+    "growth_pct": "增长率",
+    "absolute_growth": "绝对增长量",
+})
 
-DIMENSION_LABELS = {
-    "disease": "疾病",
-    "age_group": "年龄段",
-    "hospital": "医院",
-    "county": "县",
-    "service_area": "服务区域",
-    "year": "年份",
-    "payment": "支付方式",
-    "gender": "性别",
-    "admission_type": "入院类型",
-    "severity": "病情严重程度",
-}
+DIMENSION_LABELS = {key: spec.label for key, spec in registry.DIMENSIONS.items()}
 
 
 def _toolbox() -> dict:
@@ -84,11 +75,14 @@ def build_bar_option(data: dict, value_field: str = None) -> dict:
         "aria": {"enabled": True},
         "toolbox": _toolbox(),
         "tooltip": {"trigger": "axis"},
-        "grid": {"left": 40, "right": 20, "bottom": 90 if len(rows) > 10 else 60, "top": 50},
+        "grid": {
+            "left": 88, "right": 20, "bottom": 90 if len(rows) > 10 else 60,
+            "top": 50, "containLabel": False,
+        },
         "dataZoom": _data_zoom(len(rows)),
         "xAxis": {
             "type": "category", "data": categories,
-            "axisLabel": {"rotate": 30, "interval": 0},
+            "axisLabel": {"rotate": 30, "interval": 0, "width": 150, "overflow": "truncate"},
         },
         "yAxis": {"type": "value"},
         "series": [{
@@ -123,6 +117,24 @@ def build_line_option(data: dict, value_field: str = None) -> dict:
     """折线图配置（趋势）。"""
     rows = _rows(data)
     value_field = value_field or _pick_value_field(data)
+    dimensions = data.get("dimensions") or [data.get("dimension")]
+    if len(dimensions) == 2 and "year" in dimensions:
+        series_dimension = next(item for item in dimensions if item != "year")
+        years = sorted({int(row["year"]) for row in rows if row.get("year") is not None})
+        totals = {}
+        for row in rows:
+            key = str(row.get(series_dimension) or "(未标注)")
+            totals[key] = totals.get(key, 0) + float(row.get("count") or 0)
+        selected = [key for key, _ in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:8]]
+        lookup = {(str(row.get(series_dimension) or "(未标注)"), int(row["year"])): row.get(value_field) for row in rows if row.get("year") is not None}
+        return {
+            "title": {"text": f"{DIMENSION_LABELS.get(series_dimension, series_dimension)} - {METRIC_LABELS.get(value_field, value_field)} 四年趋势"},
+            "aria": {"enabled": True}, "toolbox": _toolbox(), "tooltip": {"trigger": "axis"},
+            "legend": {"type": "scroll", "top": 28},
+            "grid": {"left": 88, "right": 20, "bottom": 60, "top": 75, "containLabel": False},
+            "xAxis": {"type": "category", "data": years, "boundaryGap": False}, "yAxis": {"type": "value"},
+            "series": [{"name": key, "type": "line", "data": [lookup.get((key, year)) for year in years], "smooth": True, "connectNulls": False} for key in selected],
+        }
     categories = [str(r.get("dimension_value") or r.get("year")) for r in rows]
     values = [r.get(value_field) for r in rows]
     dim_label = DIMENSION_LABELS.get(data.get("dimension", ""), "维度")
@@ -131,6 +143,7 @@ def build_line_option(data: dict, value_field: str = None) -> dict:
         "aria": {"enabled": True},
         "toolbox": _toolbox(),
         "tooltip": {"trigger": "axis"},
+        "grid": {"left": 88, "right": 20, "bottom": 60, "top": 50, "containLabel": False},
         "dataZoom": _data_zoom(len(rows)),
         "xAxis": {"type": "category", "data": categories, "boundaryGap": False},
         "yAxis": {"type": "value"},

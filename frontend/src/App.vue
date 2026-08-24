@@ -1,16 +1,17 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from './components/AppIcon.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import DashboardChart from './components/DashboardChart.vue'
-import { createReport, dataQuality, health, overview, predictCost, publishReport, streamChat } from './api/client'
+import { createReport, dataQuality, health, listNotifications, overview, predictCost, publishReport, streamChat } from './api/client'
 import { authState, can, logout } from './auth'
 
 const route = useRoute()
 const router = useRouter()
 const activeView = computed(() => String(route.name || 'overview'))
-const dateRange = ref('2021 年')
+const dateRange = ref('all')
+const availableYears = ref([2024, 2023, 2022, 2021])
 const regionFilter = ref('全部服务区域')
 const mobileMenuOpen = ref(false)
 const loading = ref(false)
@@ -26,12 +27,16 @@ const qualityReport = ref({})
 const lastIngestion = ref(null)
 const reportContent = ref('')
 const reportId = ref(null)
+const reportTitle = ref('')
 const reportLoading = ref(false)
+const reportFilter = ref('all')
 const lastResponseMs = ref(0)
 const searchQuery = ref('')
 const costLoading = ref(false)
 const costError = ref('')
 const costResult = ref(null)
+const unreadNotifications = ref(0)
+let notificationTimer = null
 const costForm = reactive({
   hospital_service_area: 'New York City', hospital_county: '', age_group: '50 to 69',
   gender: 'F', race: '', ethnicity: '', type_of_admission: 'Emergency',
@@ -49,9 +54,9 @@ const navItems = computed(() => [
   { id: 'data', label: '数据资产', icon: 'database', permission: 'data_asset:read' },
   { id: 'patients', label: '患者画像', icon: 'users', permission: 'patient_profile:read' },
   { id: 'reports', label: '分析报告', icon: 'report', permission: 'report:generate' },
-  { id: 'public-reports', label: '公开报告', icon: 'report', permission: 'report:public:read', patientOnly: true },
+  { id: 'public-reports', label: '公开报告', icon: 'report', permission: 'report:public:read' },
   { id: 'account', label: '账户设置', icon: 'settings' },
-].filter((item) => (!item.permission || can(item.permission)) && (!item.anyPermission || item.anyPermission.some(can)) && (!item.patientOnly || !can('report:generate'))))
+].filter((item) => (!item.permission || can(item.permission)) && (!item.anyPermission || item.anyPermission.some(can))))
 const viewMeta = {
   overview: { title: '医疗运营总览', subtitle: '聚合住院、费用与资源利用指标，辅助管理决策' },
   ai: { title: 'AI 智能分析', subtitle: '用自然语言探索医疗大数据，快速生成洞察与图表' },
@@ -68,11 +73,22 @@ const totalRecords = computed(() => Number(dashboard.value.summary?.discharges |
 const qualityScore = computed(() => Number(qualityReport.value.overall || 0) * 100)
 const topAgeGroup = computed(() => [...(dashboard.value.ages || [])].sort((a, b) => b.count - a.count)[0]?.dimension_value || '暂无')
 const topDiseaseName = computed(() => dashboard.value.diseases?.[0]?.dimension_value || '暂无')
+const aiSuggestions = computed(() => {
+  if (can('analytics:financial')) return [
+    '四年收费成本差额率有什么变化？', '做病例组合校正后的医院成本比较',
+    '检查四年数据质量和异常', '分析各区域医院集中度',
+  ]
+  if (can('ai:advanced')) return [
+    '四年主要疾病趋势', '病情严重程度与资源消耗',
+    '急诊入院路径有什么变化？', '不同支付方式的成本差异',
+  ]
+  return ['2021至2024年住院量趋势', '哪些疾病住院量较高？', '不同服务区域住院趋势']
+})
 
 const metrics = computed(() => [
-  { label: '出院记录', value: formatNumber(totalRecords.value), unit: '条', trend: '全量', direction: 'up', note: '去重清洗后', icon: 'activity', tone: 'teal' },
+  { label: '出院记录', value: formatNumber(totalRecords.value), unit: '条', trend: dateRange.value === 'all' ? '全量' : `${dateRange.value}年`, direction: 'up', note: '去重清洗后', icon: 'activity', tone: 'teal' },
   { label: '平均住院日', value: formatNumber(dashboard.value.summary?.avg_length_of_stay, 2), unit: '天', trend: '核心', direction: 'down', note: '全体患者均值', icon: 'clock', tone: 'blue' },
-  { label: '次均住院费用', value: formatNumber(dashboard.value.summary?.avg_total_charges), unit: '元', trend: '费用', direction: 'up', note: 'Total Charges', icon: 'wallet', tone: 'amber' },
+  { label: '次均账单费用', value: formatNumber(dashboard.value.summary?.avg_total_charges), unit: '美元', trend: '费用', direction: 'up', note: 'Total Charges（名义金额）', icon: 'wallet', tone: 'amber' },
   { label: '覆盖医疗机构', value: formatNumber(dashboard.value.summary?.facilities), unit: '家', trend: '机构', direction: 'up', note: '去重机构数', icon: 'hospital', tone: 'violet' },
 ])
 
@@ -99,11 +115,24 @@ const pipelineRows = computed(() => [
   { source: 'DeepSeek V4 Flash', type: 'Anthropic SSE', records: '流式', updated: '按需调用', status: '已完成' },
 ])
 const reportCards = [
-  { type: '运营分析', title: '医疗运营综合分析报告', date: '实时生成', desc: '覆盖住院量、住院效率、费用结构与重点疾病变化。', icon: 'file-chart', color: 'teal' },
-  { type: '患者画像', title: '重点患者群体结构分析', date: '实时生成', desc: '聚焦年龄、性别与病情严重程度的患者群体结构。', icon: 'users', color: 'blue' },
-  { type: '费用分析', title: '重点疾病住院费用报告', date: '实时生成', desc: '识别住院量与次均费用较高的重点疾病组。', icon: 'wallet', color: 'amber' },
-  { type: '数据质量', title: '住院数据质量评估报告', date: '最近导入', desc: '从完整性、准确性、一致性和时效性四维评估。', icon: 'shield', color: 'violet' },
+  { category: 'operations', type: '运营分析', title: '医疗运营综合分析报告', date: '实时生成', desc: '覆盖住院量、住院效率、费用结构与重点疾病变化。', icon: 'file-chart', color: 'teal' },
+  { category: 'operations', type: '患者画像', title: '重点患者群体结构分析', date: '实时生成', desc: '聚焦年龄、性别与病情严重程度的患者群体结构。', icon: 'users', color: 'blue' },
+  { category: 'cost', type: '费用分析', title: '重点疾病住院费用报告', date: '实时生成', desc: '识别住院量与次均费用较高的重点疾病组。', icon: 'wallet', color: 'amber' },
+  { category: 'quality', type: '数据质量', title: '住院数据质量评估报告', date: '最近导入', desc: '从完整性、准确性、一致性和时效性四维评估。', icon: 'shield', color: 'violet' },
 ]
+const reportTabs = [
+  { id: 'all', label: '全部报告' },
+  { id: 'operations', label: '运营分析' },
+  { id: 'cost', label: '费用分析' },
+  { id: 'quality', label: '数据质量' },
+]
+const filteredReportCards = computed(() => reportFilter.value === 'all'
+  ? reportCards
+  : reportCards.filter((report) => report.category === reportFilter.value))
+const selectedReportTab = computed(() => reportTabs.find((tab) => tab.id === reportFilter.value) || reportTabs[0])
+const reportTabCount = (tabId) => tabId === 'all'
+  ? reportCards.length
+  : reportCards.filter((report) => report.category === tabId).length
 
 const axisStyle = { axisLine: { lineStyle: { color: '#dfe5e8' } }, axisTick: { show: false }, axisLabel: { color: '#7b8792', fontSize: 11 } }
 const tooltipStyle = { backgroundColor: '#213038', borderWidth: 0, textStyle: { color: '#fff', fontSize: 12 }, padding: [9, 12] }
@@ -133,7 +162,12 @@ const diseaseOption = computed(() => ({ tooltip: { trigger: 'axis', ...tooltipSt
 const genderOption = computed(() => { const labels = { F: '女性', M: '男性', U: '未知' }; return { tooltip: { trigger: 'item', ...tooltipStyle }, series: [{ type: 'pie', radius: ['56%', '78%'], center: ['50%', '50%'], label: { show: false }, data: (dashboard.value.genders || []).map((r, i) => ({ value: r.count, name: labels[r.dimension_value] || '未知', itemStyle: { color: ['#2a8f86', '#7398c8', '#d9dfe4'][i % 3] } })) }], graphic: [{ type: 'text', left: 'center', top: '42%', style: { text: `${formatNumber(totalRecords.value)}\n总记录`, textAlign: 'center', fill: '#33444e', fontSize: 12, lineHeight: 20, fontWeight: 600 } }] } })
 const mortalityOption = computed(() => { const rows = ratioRows(dashboard.value.severity || []); return { tooltip: { trigger: 'axis', ...tooltipStyle }, grid: { left: 8, right: 15, top: 18, bottom: 2, containLabel: true }, xAxis: { type: 'category', data: rows.map((r) => r.dimension_value), ...axisStyle }, yAxis: { type: 'value', ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: '{value}%' } }, series: [{ type: 'bar', barWidth: 30, data: rows.map((r) => Number(r.percent.toFixed(2))), itemStyle: { color: (p) => ['#9bd4ce', '#5eb8ae', '#e7b46d', '#d8796e'][p.dataIndex % 4], borderRadius: [5, 5, 0, 0] }, label: { show: true, position: 'top', color: '#6c7983', fontSize: 10, formatter: '{c}%' } }] } })
 
-function filters() { return regionFilter.value === '全部服务区域' ? {} : { service_area: regionFilter.value } }
+function filters() {
+  const selected = {}
+  if (regionFilter.value !== '全部服务区域') selected.service_area = regionFilter.value
+  if (dateRange.value !== 'all') selected.year = Number(dateRange.value)
+  return selected
+}
 async function loadDashboard() {
   dataLoading.value = true; apiError.value = ''
   try {
@@ -141,6 +175,12 @@ async function loadDashboard() {
       overview(filters()), health(), can('data_asset:read') ? dataQuality() : Promise.resolve(null),
     ])
     dashboard.value = overviewResponse.data
+    if (dateRange.value === 'all') {
+      const years = (overviewResponse.data.trend || [])
+        .map((row) => Number(row.year))
+        .filter((year) => Number.isInteger(year))
+      if (years.length) availableYears.value = [...new Set(years)].sort((a, b) => b - a)
+    }
     lastResponseMs.value = Number(overviewResponse.meta?.elapsed_ms || 0)
     qualityReport.value = qualityResponse?.data?.quality || {}
     lastIngestion.value = qualityResponse?.data?.latest_ingestion || null
@@ -149,17 +189,25 @@ async function loadDashboard() {
 }
 function selectView(id) { router.push(`/${id}`); mobileMenuOpen.value = false; window.scrollTo({ top: 0, behavior: 'smooth' }) }
 async function signOut() { await logout(); await router.replace('/login') }
+async function refreshUnreadNotifications() {
+  if (!['patient', 'doctor'].includes(authState.user?.role)) return
+  try { unreadNotifications.value = Number((await listNotifications(1)).data?.unread_count || 0) } catch (_error) { /* 不让通知检查影响主页 */ }
+}
+function openNotifications() { router.push('/notifications') }
 async function send(query) {
   if (!query.trim() || loading.value) return
   messages.value.push({ role: 'user', content: query }); loading.value = true; aiSummary.value = ''
   aiChartOption.value = null
   let assistantMessage
+  let pendingChartOption = null
   try {
     await streamChat(query, {
-      context(payload) { aiChartOption.value = payload.chart || null; conversationId.value = payload.conversation_id || conversationId.value },
+      context(payload) { pendingChartOption = payload.chart || null; conversationId.value = payload.conversation_id || conversationId.value },
       delta(payload) { if (!assistantMessage) { assistantMessage = { role: 'assistant', content: '' }; messages.value.push(assistantMessage) }; assistantMessage.content += payload.text; aiSummary.value += payload.text },
       done(payload) { conversationId.value = payload.conversation_id || conversationId.value; if (!aiSummary.value) aiSummary.value = payload.summary || '分析已完成。' },
     }, conversationId.value)
+    // 图表上下文通常先于文字流返回；等待整个文字流结束后再挂载图表，避免抢占阅读焦点。
+    aiChartOption.value = pendingChartOption
   } catch (error) {
     aiChartOption.value = null
     aiSummary.value = error.message || '当前无法准确完成该问题的分析，请稍后重试或补充分析维度和指标。'
@@ -193,9 +241,28 @@ function resetCostPrediction() {
   })
   costResult.value = null; costError.value = ''
 }
-async function generateReport() {
+function sectionsForReport(report) {
+  if (!report) return undefined
+  const base = { filters: filters(), sort_order: null }
+  if (report.title === '医疗运营综合分析报告') return [
+    { title: '年度住院运营趋势', data: { ...base, dimension: 'year', dimension_label: '年份', metrics: ['count', 'avg_length_of_stay'], rows: (dashboard.value.trend || []).map((row) => ({ ...row, dimension_value: row.year })) } },
+    { title: '重点疾病负担', data: { ...base, dimension: 'disease', dimension_label: '疾病', metrics: ['count', 'avg_length_of_stay', 'avg_total_charges'], sort_by: 'count', rows: dashboard.value.diseases || [] } },
+  ]
+  if (report.title === '重点患者群体结构分析') return [
+    { title: '年龄结构', data: { ...base, dimension: 'age_group', dimension_label: '年龄段', metrics: ['count', 'avg_length_of_stay'], sort_by: 'count', rows: dashboard.value.ages || [] } },
+    { title: '病情严重程度', data: { ...base, dimension: 'severity', dimension_label: '严重程度', metrics: ['count', 'avg_length_of_stay'], sort_by: 'count', rows: dashboard.value.severity || [] } },
+  ]
+  if (report.title === '重点疾病住院费用报告') return [
+    { title: '重点疾病住院费用', data: { ...base, dimension: 'disease', dimension_label: '疾病', metrics: ['count', 'avg_total_charges'], sort_by: 'avg_total_charges', rows: dashboard.value.diseases || [] } },
+  ]
+  return [
+    { title: '数据质量评估', data: { ...base, dimension: 'quality', dimension_label: '质量指标', metrics: ['quality_score'], sort_by: 'quality_score', rows: qualityItems.value.map((item) => ({ dimension_value: item.label, quality_score: Number(item.value.toFixed(2)) })) } },
+  ]
+}
+async function generateReport(report = null) {
   reportLoading.value = true
-  try { const response = await createReport({ title: '医疗大数据综合洞察报告' }); reportContent.value = response.data.content; reportId.value = response.data.id } catch (error) { reportContent.value = `报告生成失败：${error.message}`; reportId.value = null } finally { reportLoading.value = false }
+  const title = report?.title || '医疗大数据综合洞察报告'
+  try { const response = await createReport({ title, sections: sectionsForReport(report) }); reportContent.value = response.data.content; reportId.value = response.data.id; reportTitle.value = response.data.title } catch (error) { reportContent.value = `报告生成失败：${error.message}`; reportId.value = null; reportTitle.value = '' } finally { reportLoading.value = false }
 }
 async function publishGeneratedReport() { if (!reportId.value) return; await publishReport(reportId.value); window.alert('报告已发布，患者用户现在可以查看') }
 function exportDashboard() {
@@ -205,7 +272,7 @@ function exportDashboard() {
 function downloadReport() {
   if (!reportContent.value) return
   const blob = new Blob([reportContent.value], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = '医疗大数据洞察报告.md'; link.click(); URL.revokeObjectURL(url)
+  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${reportTitle.value || '医疗大数据洞察报告'}.md`; link.click(); URL.revokeObjectURL(url)
 }
 function runSearch() {
   const query = searchQuery.value.trim()
@@ -214,7 +281,14 @@ function runSearch() {
 }
 function analyzeDisease(name) { selectView('ai'); send(`分析疾病「${name}」的住院量、平均住院日和费用`) }
 
-onMounted(loadDashboard)
+onMounted(() => {
+  loadDashboard()
+  refreshUnreadNotifications()
+  if (['patient', 'doctor'].includes(authState.user?.role)) {
+    notificationTimer = window.setInterval(refreshUnreadNotifications, 30000)
+  }
+})
+onBeforeUnmount(() => { if (notificationTimer) window.clearInterval(notificationTimer) })
 </script>
 
 <template>
@@ -232,11 +306,11 @@ onMounted(loadDashboard)
       <header class="topbar">
         <button class="mobile-menu" aria-label="打开菜单" @click="mobileMenuOpen = true"><AppIcon name="menu" :size="22" /></button>
         <div class="global-search"><AppIcon name="search" :size="17" /><input v-model="searchQuery" placeholder="输入问题，回车交给 AI 分析" @keyup.enter="runSearch" /><kbd>↵</kbd></div>
-        <div class="topbar-actions"><div class="demo-pill"><span :class="{ offline: !apiConnected }"></span> {{ apiConnected ? '数据服务正常' : '服务未连接' }}</div><button class="icon-button" aria-label="通知"><AppIcon name="bell" :size="19" /><i></i></button><div class="profile"><div class="avatar">{{ (authState.user?.display_name || authState.user?.username || '用').slice(0,1) }}</div><div><strong>{{ authState.user?.display_name || authState.user?.username }}</strong><small>{{ authState.user?.role === 'admin' ? '运维员' : authState.user?.role === 'doctor' ? '医生用户' : '患者用户' }}</small></div><button class="logout-button" @click="signOut">退出</button></div></div>
+        <div class="topbar-actions"><div class="demo-pill"><span :class="{ offline: !apiConnected }"></span> {{ apiConnected ? '数据服务正常' : '服务未连接' }}</div><button class="icon-button" :aria-label="unreadNotifications ? `通知，${unreadNotifications}条未读` : '通知'" @click="openNotifications"><AppIcon name="bell" :size="19" /><i v-if="unreadNotifications > 0"></i></button><div class="profile"><div class="avatar">{{ (authState.user?.display_name || authState.user?.username || '用').slice(0,1) }}</div><div><strong>{{ authState.user?.display_name || authState.user?.username }}</strong><small>{{ authState.user?.role === 'admin' ? '运维员' : authState.user?.role === 'doctor' ? '医生用户' : '患者用户' }}</small></div><button class="logout-button" @click="signOut">退出</button></div></div>
       </header>
 
       <main class="content">
-        <div class="page-heading"><div><p class="eyebrow">SMART HEALTHCARE PLATFORM</p><h1>{{ currentMeta.title }}</h1><span>{{ currentMeta.subtitle }}</span></div><div v-if="activeView === 'overview'" class="filters"><label><AppIcon name="hospital" :size="15" /><select v-model="regionFilter" @change="loadDashboard"><option>全部服务区域</option><option>New York City</option><option>Long Island</option><option>Hudson Valley</option><option>Capital/Adirondack</option><option>Central NY</option><option>Western NY</option><option>Southern Tier</option><option>Finger Lakes</option></select><AppIcon name="chevron-down" :size="13" /></label><label><AppIcon name="calendar" :size="15" /><select v-model="dateRange"><option>2021 年</option></select><AppIcon name="chevron-down" :size="13" /></label><button v-if="can('data:export')" class="outline-button" @click="exportDashboard"><AppIcon name="download" :size="15" /> 导出</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">SMART HEALTHCARE PLATFORM</p><h1>{{ currentMeta.title }}</h1><span>{{ currentMeta.subtitle }}</span></div><div v-if="activeView === 'overview'" class="filters" :aria-busy="dataLoading"><label><AppIcon name="hospital" :size="15" /><select v-model="regionFilter" :disabled="dataLoading" aria-label="选择服务区域" @change="loadDashboard"><option>全部服务区域</option><option>New York City</option><option>Long Island</option><option>Hudson Valley</option><option>Capital/Adirondack</option><option>Central NY</option><option>Western NY</option><option>Southern Tier</option><option>Finger Lakes</option></select><AppIcon name="chevron-down" :size="13" /></label><label><AppIcon name="calendar" :size="15" /><select v-model="dateRange" :disabled="dataLoading" aria-label="选择出院年份" @change="loadDashboard"><option value="all">全部年份</option><option v-for="year in availableYears" :key="year" :value="String(year)">{{ year }} 年</option></select><AppIcon name="chevron-down" :size="13" /></label><span v-if="dataLoading" class="filter-loading"><AppIcon name="refresh" :size="12" /> 更新中</span><button v-if="can('data:export')" class="outline-button" @click="exportDashboard"><AppIcon name="download" :size="15" /> 导出</button></div></div>
         <div v-if="apiError" class="api-error"><AppIcon name="info" :size="16" /> {{ apiError }}，当前页面保留已加载数据。</div>
 
         <template v-if="activeView === 'overview'">
@@ -247,13 +321,13 @@ onMounted(loadDashboard)
         </template>
 
         <template v-else-if="activeView === 'ai'">
-          <div class="ai-layout"><section class="ai-chat-wrap"><div class="section-title"><span class="title-icon"><AppIcon name="brain" :size="20" /></span><div><h2>对话式数据分析</h2><p>{{can('ai:basic')?'面向患者的公开趋势与健康科普，不提供个人诊断建议':'我会将你的问题转换为分析任务，并仅在意图明确时返回可视化图表'}}</p></div></div><ChatPanel :messages="messages" :loading="loading" :suggestions="can('ai:basic') ? ['2021年住院量趋势','哪些疾病住院量较高？','不同服务区域住院趋势'] : ['2021年住院量趋势', '不同年龄段患者占比', '哪些疾病费用最高？', '支付方式占比']" @send="send" /></section><section class="ai-result-wrap"><article class="panel ai-result-card"><div class="panel-head"><div><h2>分析结果</h2><p>{{ apiConnected ? '连接 SQL Server · 支持 DeepSeek 语义理解与流式生成' : '等待数据服务连接' }}</p></div><div class="result-actions"><button @click="aiChartOption = null"><AppIcon name="refresh" :size="15" /></button><button v-if="can('data:export') && aiChartOption" @click="exportDashboard"><AppIcon name="download" :size="15" /></button></div></div><div class="ai-summary"><span><AppIcon name="sparkle" :size="16" /></span><p>{{ aiSummary }}</p></div><DashboardChart v-if="aiChartOption" :option="aiChartOption" height="350px" /><div v-else class="ai-chart-empty"><AppIcon name="sparkle" :size="22" /><span>问题意图明确且查询到有效数据后，图表将在这里展示</span></div><div class="chart-note"><span>分析口径</span> 住院出院记录 · 已去重并排除异常费用数据</div></article><div class="quick-facts"><article><span>当前数据集</span><strong>{{ formatNumber(totalRecords) }} 条</strong><small>住院出院记录</small></article><article><span>可分析维度</span><strong>{{can('ai:basic')?'3':'13'}} 个</strong><small>疾病 / 年份 / 区域等</small></article><article><span>聚合响应</span><strong>{{ lastResponseMs ? `${(lastResponseMs / 1000).toFixed(2)} 秒` : '—' }}</strong><small>最近一次总览查询</small></article></div></section></div>
+          <div class="ai-layout"><section class="ai-chat-wrap"><div class="section-title"><span class="title-icon"><AppIcon name="brain" :size="20" /></span><div><h2>对话式数据分析</h2><p>{{can('ai:basic')?'面向患者的公开趋势与健康科普，不提供个人诊断建议':'我会将你的问题转换为分析任务，并仅在意图明确时返回可视化图表'}}</p></div></div><ChatPanel :messages="messages" :loading="loading" :suggestions="aiSuggestions" @send="send" /></section><section class="ai-result-wrap"><article class="panel ai-result-card"><div class="panel-head"><div><h2>分析结果</h2><p>{{ apiConnected ? '连接 SQL Server · 支持 DeepSeek 语义理解与流式生成' : '等待数据服务连接' }}</p></div><div class="result-actions"><button @click="aiChartOption = null"><AppIcon name="refresh" :size="15" /></button><button v-if="can('data:export') && aiChartOption" @click="exportDashboard"><AppIcon name="download" :size="15" /></button></div></div><div class="ai-summary"><span><AppIcon name="sparkle" :size="16" /></span><p>{{ aiSummary }}</p></div><Transition name="chart-reveal" mode="out-in"><DashboardChart v-if="aiChartOption" key="chart" :option="aiChartOption" height="350px" /><div v-else key="placeholder" class="ai-chart-empty" :class="{ waiting: loading }"><AppIcon name="sparkle" :size="22" /><span>{{ loading ? '正在生成文字分析，完成后将展示图表' : '问题意图明确且查询到有效数据后，图表将在这里展示' }}</span></div></Transition><div class="chart-note"><span>分析口径</span> 四年住院出院记录 · 跨年标签已统一 · 金额为名义美元</div></article><div class="quick-facts"><article><span>当前数据集</span><strong>{{ formatNumber(totalRecords) }} 条</strong><small>住院出院记录</small></article><article><span>可分析维度</span><strong>{{can('ai:basic')?'3':'29'}} 个</strong><small>实际可用范围按角色授权</small></article><article><span>聚合响应</span><strong>{{ lastResponseMs ? `${(lastResponseMs / 1000).toFixed(2)} 秒` : '—' }}</strong><small>最近一次总览查询</small></article></div></section></div>
         </template>
 
         <template v-else-if="activeView === 'cost-prediction'">
           <div class="cost-layout">
             <section class="panel cost-form-panel">
-              <div class="panel-head"><div><h2>住院编码信息</h2><p>未填写字段由模型按训练数据缺失值规则处理，填写越完整通常越可靠</p></div><span class="model-badge">ML · 2024 验证</span></div>
+              <div class="panel-head"><div><h2>住院编码信息</h2><p>未填写字段由模型按训练数据缺失值规则处理，填写越完整通常越可靠</p></div><span class="model-badge">机器学习模型 · 2024测试集验证</span></div>
               <form class="cost-form" @submit.prevent="submitCostPrediction">
                 <div class="cost-form-section"><h3>基本与入院信息</h3><div class="cost-field-grid">
                   <label><span>服务区域</span><select v-model="costForm.hospital_service_area"><option value="">未知</option><option>New York City</option><option>Long Island</option><option>Hudson Valley</option><option>Capital/Adirondack</option><option>Central NY</option><option>Western NY</option><option>Southern Tier</option><option>Finger Lakes</option></select></label>
@@ -318,9 +392,10 @@ onMounted(loadDashboard)
         </template>
 
         <template v-else-if="activeView === 'reports'">
-          <section class="report-toolbar"><div class="report-tabs"><button class="active">全部报告 <span>4</span></button><button>运营分析</button><button>费用分析</button><button>数据质量</button></div><button class="primary-button" :disabled="reportLoading" @click="generateReport"><AppIcon name="sparkle" :size="15" /> {{ reportLoading ? '生成中' : 'AI 生成报告' }}</button></section>
-          <section class="report-grid"><article v-for="report in reportCards" :key="report.title" class="report-card"><div class="report-cover" :class="report.color"><span class="report-type">{{ report.type }}</span><AppIcon :name="report.icon" :size="42" :stroke-width="1.4" /><i></i><i></i><i></i></div><div class="report-body"><small>{{ report.date }}</small><h2>{{ report.title }}</h2><p>{{ report.desc }}</p><div><button @click="generateReport">生成报告 <AppIcon name="arrow-right" :size="13" /></button><button class="icon-button" :disabled="!reportContent" @click="downloadReport"><AppIcon name="download" :size="15" /></button></div></div></article></section>
-          <section v-if="reportContent" class="panel generated-report"><div class="panel-head"><div><h2>最新生成报告</h2><p>Markdown 实时预览</p></div><div class="result-actions"><button v-if="can('system:manage') && reportId" title="发布为公开报告" @click="publishGeneratedReport"><AppIcon name="check" :size="15" /></button><button @click="downloadReport"><AppIcon name="download" :size="15" /></button><button @click="reportContent = ''; reportId = null"><AppIcon name="close" :size="15" /></button></div></div><pre>{{ reportContent }}</pre></section>
+          <section class="report-toolbar"><div class="report-tabs" role="tablist" aria-label="报告类型筛选"><button v-for="tab in reportTabs" :key="tab.id" role="tab" :class="{ active: reportFilter === tab.id }" :aria-selected="reportFilter === tab.id" @click="reportFilter = tab.id">{{ tab.label }} <span>{{ reportTabCount(tab.id) }}</span></button></div><button class="primary-button" :disabled="reportLoading" @click="generateReport()"><AppIcon name="sparkle" :size="15" /> {{ reportLoading ? '生成中' : 'AI 生成报告' }}</button></section>
+          <div class="report-filter-summary" aria-live="polite"><span><AppIcon name="check" :size="13" /> 当前分类</span><strong>{{ selectedReportTab.label }}</strong><small>显示 {{ filteredReportCards.length }} 个报告模块</small></div>
+          <section class="report-grid"><article v-for="report in filteredReportCards" :key="`${reportFilter}-${report.title}`" class="report-card report-card-enter"><div class="report-cover" :class="report.color"><span class="report-type">{{ report.type }}</span><AppIcon :name="report.icon" :size="42" :stroke-width="1.4" /><i></i><i></i><i></i></div><div class="report-body"><small>{{ report.date }}</small><h2>{{ report.title }}</h2><p>{{ report.desc }}</p><div><button @click="generateReport(report)">生成报告 <AppIcon name="arrow-right" :size="13" /></button><button class="icon-button" :disabled="!reportContent" @click="downloadReport"><AppIcon name="download" :size="15" /></button></div></div></article></section>
+          <section v-if="reportContent" class="panel generated-report"><div class="panel-head"><div><h2>{{ reportTitle || '最新生成报告' }}</h2><p>Markdown 实时预览</p></div><div class="result-actions"><button v-if="can('system:manage') && reportId" title="发布为公开报告" @click="publishGeneratedReport"><AppIcon name="check" :size="15" /></button><button @click="downloadReport"><AppIcon name="download" :size="15" /></button><button @click="reportContent = ''; reportId = null; reportTitle = ''"><AppIcon name="close" :size="15" /></button></div></div><pre>{{ reportContent }}</pre></section>
           <section class="panel recent-reports"><div class="panel-head"><div><h2>最近生成记录</h2><p>平台自动与手动生成的报告任务</p></div></div><div class="activity-list"><div><span class="activity-icon"><AppIcon name="file-chart" :size="17" /></span><div><strong>医疗运营综合分析报告</strong><p>支持基于当前 SQL Server 数据实时生成</p></div><em class="status-tag">可生成</em></div><div><span class="activity-icon"><AppIcon name="sparkle" :size="17" /></span><div><strong>重点疾病费用分析</strong><p>由 DeepSeek V4 Flash 生成摘要</p></div><em class="status-tag">可生成</em></div><div><span class="activity-icon"><AppIcon name="shield" :size="17" /></span><div><strong>住院数据质量报告</strong><p>系统在每次全量导入后自动评估</p></div><em class="status-tag">已完成</em></div></div></section>
         </template>
       </main>
@@ -339,14 +414,18 @@ onMounted(loadDashboard)
 .dashboard-grid{display:grid;gap:13px;margin-top:13px}.primary-row{grid-template-columns:minmax(0,1.75fr) minmax(330px,.95fr)}.secondary-row{grid-template-columns:repeat(3,minmax(0,1fr))}.panel{min-width:0;padding:18px 19px;background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow)}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:9px}.panel-head h2{color:#2c3c45;font-size:13px;font-weight:650}.panel-head p{margin-top:4px;color:#929ba1;font-size:9px}.text-button{display:inline-flex;align-items:center;gap:4px;padding:3px 0;color:#37817b;border:0;background:transparent;font-size:10px;cursor:pointer}.text-button:hover{color:#115d58}.ai-badge{display:flex;align-items:center;gap:4px;padding:5px 7px;color:#1b7c74;background:#e9f6f4;border-radius:6px;font-size:9px;font-weight:700}.insight-panel{padding-bottom:13px}.insight-list{display:grid}.insight-item{position:relative;display:flex;gap:11px;padding:12px 2px;border-top:1px solid #edf0f2}.insight-item:first-child{border-top:0}.insight-mark{width:4px;flex:0 0 4px;margin:2px 0;border-radius:4px}.insight-mark.teal{background:#42a59b}.insight-mark.amber{background:#e4ad5f}.insight-mark.blue{background:#7099ca}.insight-item em{display:inline-block;margin-bottom:4px;padding:2px 5px;border-radius:4px;font-size:8px;font-style:normal}.insight-item em.teal{color:#16766e;background:#e8f5f3}.insight-item em.amber{color:#a66d24;background:#fbf0df}.insight-item em.blue{color:#4d72a0;background:#edf3fa}.insight-item h3{font-size:11px}.insight-item p{margin-top:4px;color:#7f8a91;font-size:9px;line-height:1.55}.insight-item button{display:flex;align-items:center;gap:3px;margin-top:5px;color:#43827d;background:transparent;border:0;font-size:9px;cursor:pointer}
 .data-table-panel{margin-top:13px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th{padding:10px 12px;color:#929ba1;background:#f7f9f9;border-bottom:1px solid #e8ecee;font-size:9px;font-weight:500;text-align:left}td{padding:12px;color:#65727b;border-bottom:1px solid #edf0f1;font-size:10px}tbody tr:last-child td{border-bottom:0}td strong{color:#3b4a52;font-weight:600}.disease-dot{display:inline-block;width:6px;height:6px;margin-right:9px;border-radius:2px;background:#55aa9f}.positive,.negative{display:inline-block;padding:3px 6px;border-radius:5px;font-style:normal}.positive{color:#188174;background:#eaf6f3}.negative{color:#b35e58;background:#faeeee}.row-action{width:25px;height:25px;display:grid;place-items:center;color:#8d989f;background:transparent;border:1px solid #e2e6e8;border-radius:7px;cursor:pointer}
 .ai-layout{display:grid;grid-template-columns:minmax(370px,.82fr) minmax(500px,1.18fr);gap:16px;align-items:stretch}.ai-chat-wrap,.ai-result-wrap{min-width:0}.section-title{display:flex;align-items:center;gap:11px;margin-bottom:12px}.title-icon{width:38px;height:38px;display:grid;place-items:center;color:#176f6a;background:#e5f3f1;border-radius:11px}.section-title h2{font-size:13px}.section-title p{margin-top:4px;color:#879199;font-size:9px}.ai-chat-wrap .chat-panel{height:550px}.ai-result-card{min-height:550px}.result-actions{display:flex;gap:5px}.result-actions button{width:28px;height:28px;display:grid;place-items:center;color:#7b878e;background:#f8f9f9;border:1px solid #e5e9eb;border-radius:7px;cursor:pointer}.ai-summary{display:flex;gap:10px;margin:15px 0 8px;padding:12px 13px;color:#47565f;background:#f0f8f6;border:1px solid #dbeeea;border-radius:10px;font-size:10px;line-height:1.7}.ai-summary span{color:#198077;margin-top:1px}.chart-note{padding-top:11px;border-top:1px solid #edf0f1;color:#929ba1;font-size:9px}.chart-note span{display:inline-block;margin-right:6px;color:#667780;font-weight:600}.quick-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}.quick-facts article{padding:13px 14px;background:#fff;border:1px solid var(--line);border-radius:10px}.quick-facts span,.quick-facts small,.quick-facts strong{display:block}.quick-facts span{color:#929da3;font-size:9px}.quick-facts strong{margin:5px 0 3px;color:#31434c;font-size:15px}.quick-facts small{color:#9ca5aa;font-size:8px}
-.ai-chart-empty{height:350px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#98a5aa;background:#f8faf9;border:1px dashed #d8e3e1;border-radius:10px;font-size:10px}.ai-chart-empty svg{color:#65a39d}
+.ai-chart-empty{height:350px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#98a5aa;background:#f8faf9;border:1px dashed #d8e3e1;border-radius:10px;font-size:10px}.ai-chart-empty svg{color:#65a39d}.ai-chart-empty.waiting svg{animation:ai-waiting-pulse 1.35s ease-in-out infinite}.chart-reveal-enter-active{transition:opacity .32s ease,transform .32s ease}.chart-reveal-leave-active{transition:opacity .12s ease}.chart-reveal-enter-from{opacity:0;transform:translateY(10px)}.chart-reveal-leave-to{opacity:0}@keyframes ai-waiting-pulse{0%,100%{opacity:.42;transform:scale(.92)}50%{opacity:1;transform:scale(1.08)}}@media(prefers-reduced-motion:reduce){.chart-reveal-enter-active,.chart-reveal-leave-active{transition:none}.ai-chart-empty.waiting svg{animation:none}}
 .data-overview-grid{display:grid;grid-template-columns:1fr 1.15fr;gap:13px}.quality-score-card{display:flex;align-items:center;gap:25px;padding:22px 26px;color:#fff;background:linear-gradient(130deg,#194f4c,#176f69);border-radius:14px;box-shadow:0 10px 30px rgba(18,86,81,.13)}.score-ring{width:112px;height:112px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:0 0 auto;border:8px solid rgba(255,255,255,.18);outline:3px solid rgba(87,211,193,.85);outline-offset:-6px;border-radius:50%}.score-ring strong{font-size:27px}.score-ring small{color:#afd4cf;font-size:8px}.quality-score-card .tag{display:inline-flex;align-items:center;gap:4px;padding:4px 7px;color:#bce8dc;background:rgba(255,255,255,.1);border-radius:5px;font-size:8px}.quality-score-card h2{margin:12px 0 7px;font-size:17px}.quality-score-card p{max-width:330px;color:#b6cfcc;font-size:10px;line-height:1.6}.quality-bars{padding-top:20px}.quality-row{display:grid;grid-template-columns:50px 1fr 42px;align-items:center;gap:10px;margin:13px 0;color:#66747d;font-size:9px}.quality-row>div{height:6px;overflow:hidden;background:#edf1f2;border-radius:5px}.quality-row i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#2b8d85,#61b9ae)}.quality-row strong{color:#4c5d65;font-size:9px;text-align:right}.data-metrics{margin-top:13px}.mini-stat{padding:16px 18px;background:#fff;border:1px solid var(--line);border-radius:11px}.mini-stat span,.mini-stat small,.mini-stat strong{display:block}.mini-stat span{color:#88949b;font-size:9px}.mini-stat strong{margin:7px 0 4px;font-size:20px}.mini-stat small{color:#8b989e;font-size:8px}.source-icon{display:inline-grid;place-items:center;width:27px;height:27px;margin-right:8px;color:#2b837c;background:#e9f5f3;border-radius:7px;vertical-align:middle}.status-tag{display:inline-block;padding:4px 7px;color:#208176;background:#e7f5f2;border-radius:5px;font-size:8px;font-style:normal}.status-tag.syncing{color:#a36c24;background:#fbf0df}.pipeline{margin-top:13px;padding:20px 22px;background:#fff;border:1px solid var(--line);border-radius:13px}.pipeline-head h2{font-size:13px}.pipeline-head p{margin-top:4px;color:#919ba1;font-size:9px}.pipeline-steps{display:grid;grid-template-columns:repeat(5,1fr);margin-top:20px}.pipeline-step{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center}.pipeline-step:not(:last-child)::after{content:"";position:absolute;left:calc(50% + 25px);top:19px;width:calc(100% - 50px);border-top:1px dashed #bad3d0}.pipeline-step>span{z-index:1;width:40px;height:40px;display:grid;place-items:center;color:#247f77;background:#edf7f5;border:1px solid #d9eeeb;border-radius:11px}.pipeline-step strong{margin-top:8px;font-size:10px}.pipeline-step small{margin-top:3px;color:#97a1a7;font-size:8px}
 .patient-banner{display:grid;grid-template-columns:1.5fr repeat(3,.55fr);align-items:center;padding:22px 28px;color:#fff;background:linear-gradient(120deg,#1a504d,#1b716b);border-radius:14px;box-shadow:0 10px 30px rgba(18,86,81,.11)}.patient-banner>div:first-child>span{display:block;color:#9ccac5;font-size:9px}.patient-banner>div:first-child>strong{display:block;margin:7px 0 5px;font-size:27px}.patient-banner strong small{color:#bad5d2;font-size:10px;font-weight:400}.patient-banner p{color:#9fc0bd;font-size:9px}.banner-stat{padding-left:22px;border-left:1px solid rgba(255,255,255,.13)}.banner-stat span,.banner-stat strong{display:block}.banner-stat span{color:#a9c7c4;font-size:9px}.banner-stat strong{margin-top:7px;font-size:17px}.patient-charts{grid-template-columns:1.25fr .9fr 1.15fr}.gender-chart-wrap{display:grid;grid-template-columns:1fr auto;align-items:center}.gender-legend{display:grid;gap:12px}.gender-legend span{display:grid;grid-template-columns:7px 65px auto;align-items:center;gap:6px;color:#7f8b92;font-size:9px}.gender-legend i{width:7px;height:7px;border-radius:2px}.gender-legend i.female{background:#2a8f86}.gender-legend i.male{background:#7398c8}.gender-legend i.unknown{background:#d9dfe4}.gender-legend strong{color:#52616a;font-size:9px}.patient-segments{margin-top:13px;padding:20px;background:#fff;border:1px solid var(--line);border-radius:13px}.segment-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.segment-grid article{display:flex;align-items:center;gap:13px;padding:15px;border:1px solid #e7ebed;border-radius:10px}.segment-icon{width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;border-radius:10px}.segment-icon.teal{color:#18786f;background:#e7f5f2}.segment-icon.amber{color:#ad762c;background:#fbf0df}.segment-icon.red{color:#b65d57;background:#faeceb}.segment-grid strong,.segment-grid p,.segment-grid small{display:block}.segment-grid strong{font-size:10px}.segment-grid p{margin:5px 0;color:#879199;font-size:8px}.segment-grid small{color:#527b76;font-size:8px}
-.report-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.report-tabs{display:flex;gap:5px;padding:4px;background:#e9edee;border-radius:9px}.report-tabs button{padding:7px 12px;border:0;border-radius:6px;color:#758189;background:transparent;font-size:9px;cursor:pointer}.report-tabs button.active{color:#2f4a48;background:#fff;box-shadow:0 1px 4px rgba(31,45,52,.08)}.report-tabs span{margin-left:3px;color:#4f8b86}.report-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.report-card{overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);transition:.25s}.report-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(31,45,52,.08)}.report-cover{position:relative;height:138px;display:flex;align-items:center;justify-content:center;overflow:hidden}.report-cover.teal{color:#4fa49b;background:#e8f4f2}.report-cover.blue{color:#6b91c2;background:#edf2f8}.report-cover.amber{color:#d09a50;background:#fbf1e3}.report-cover.violet{color:#8879b7;background:#f0edf7}.report-cover .report-type{position:absolute;left:13px;top:12px;padding:4px 7px;color:currentColor;background:rgba(255,255,255,.7);border-radius:5px;font-size:8px;font-weight:600}.report-cover i{position:absolute;height:1px;background:currentColor;opacity:.18}.report-cover i:nth-of-type(1){width:70%;left:15%;bottom:27px}.report-cover i:nth-of-type(2){width:48%;left:15%;bottom:20px}.report-cover i:nth-of-type(3){width:60%;left:15%;bottom:13px}.report-body{padding:16px}.report-body>small{color:#98a1a7;font-size:8px}.report-body h2{margin:7px 0;font-size:12px}.report-body p{min-height:39px;color:#7d8990;font-size:9px;line-height:1.55}.report-body>div{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid #edf0f1}.report-body>div>button:first-child{display:flex;align-items:center;gap:4px;color:#327c76;border:0;background:transparent;font-size:9px;cursor:pointer}.report-body .icon-button{width:27px;height:27px;border:1px solid #e4e8ea}.recent-reports{margin-top:13px}.activity-list>div{display:flex;align-items:center;gap:11px;padding:11px 0;border-top:1px solid #edf0f1}.activity-list>div:first-child{border-top:0}.activity-icon{width:31px;height:31px;display:grid;place-items:center;color:#287f78;background:#eaf5f3;border-radius:8px}.activity-list>div>div{flex:1}.activity-list strong{font-size:10px}.activity-list p{margin-top:4px;color:#959fa5;font-size:8px}
+.report-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.report-tabs{display:flex;gap:5px;padding:4px;background:#e9edee;border-radius:9px}.report-tabs button{padding:8px 13px;border:1px solid transparent;border-radius:7px;color:#758189;background:transparent;font-size:9px;cursor:pointer;transition:color .18s,background .18s,box-shadow .18s,transform .18s}.report-tabs button:hover{color:#2f615d;background:rgba(255,255,255,.6)}.report-tabs button.active{color:#fff;background:var(--teal);border-color:var(--teal);box-shadow:0 5px 13px rgba(23,111,106,.24);transform:translateY(-1px);font-weight:700}.report-tabs span{display:inline-grid;min-width:16px;height:16px;margin-left:4px;place-items:center;color:#4f8b86;background:rgba(255,255,255,.72);border-radius:8px;font-size:8px}.report-tabs button.active span{color:var(--teal);background:#fff}.report-filter-summary{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:9px 12px;color:#678079;background:#edf7f5;border:1px solid #d8ece8;border-radius:9px;font-size:9px}.report-filter-summary span{display:inline-flex;align-items:center;gap:5px}.report-filter-summary strong{color:#176f6a;font-size:10px}.report-filter-summary small{margin-left:auto;color:#83938f}.report-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.report-card{overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);transition:transform .25s,box-shadow .25s}.report-card-enter{animation:report-card-in .16s ease-out both}.report-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(31,45,52,.08)}@keyframes report-card-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.report-card-enter{animation:none}}.report-cover{position:relative;height:138px;display:flex;align-items:center;justify-content:center;overflow:hidden}.report-cover.teal{color:#4fa49b;background:#e8f4f2}.report-cover.blue{color:#6b91c2;background:#edf2f8}.report-cover.amber{color:#d09a50;background:#fbf1e3}.report-cover.violet{color:#8879b7;background:#f0edf7}.report-cover .report-type{position:absolute;left:13px;top:12px;padding:4px 7px;color:currentColor;background:rgba(255,255,255,.7);border-radius:5px;font-size:8px;font-weight:600}.report-cover i{position:absolute;height:1px;background:currentColor;opacity:.18}.report-cover i:nth-of-type(1){width:70%;left:15%;bottom:27px}.report-cover i:nth-of-type(2){width:48%;left:15%;bottom:20px}.report-cover i:nth-of-type(3){width:60%;left:15%;bottom:13px}.report-body{padding:16px}.report-body>small{color:#98a1a7;font-size:8px}.report-body h2{margin:7px 0;font-size:12px}.report-body p{min-height:39px;color:#7d8990;font-size:9px;line-height:1.55}.report-body>div{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid #edf0f1}.report-body>div>button:first-child{display:flex;align-items:center;gap:4px;color:#327c76;border:0;background:transparent;font-size:9px;cursor:pointer}.report-body .icon-button{width:27px;height:27px;border:1px solid #e4e8ea}.recent-reports{margin-top:13px}.activity-list>div{display:flex;align-items:center;gap:11px;padding:11px 0;border-top:1px solid #edf0f1}.activity-list>div:first-child{border-top:0}.activity-icon{width:31px;height:31px;display:grid;place-items:center;color:#287f78;background:#eaf5f3;border-radius:8px}.activity-list>div>div{flex:1}.activity-list strong{font-size:10px}.activity-list p{margin-top:4px;color:#959fa5;font-size:8px}
 .api-error{display:flex;align-items:center;gap:8px;margin:-10px 0 16px;padding:10px 12px;color:#9b5a43;background:#fff5ee;border:1px solid #f0d8ca;border-radius:9px;font-size:10px}.status-dot.offline,.demo-pill span.offline{background:#d47669;box-shadow:0 0 0 4px rgba(212,118,105,.1)}.primary-button:disabled{cursor:wait;opacity:.62}.generated-report{margin-top:13px}.generated-report pre{max-height:520px;overflow:auto;margin:12px 0 0;padding:18px;color:#42545d;background:#f7f9f9;border:1px solid #e7ebed;border-radius:10px;font:11px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}.mobile-overlay{display:none}@media(max-width:1180px){.metric-grid{grid-template-columns:repeat(2,1fr)}.primary-row{grid-template-columns:1fr}.secondary-row{grid-template-columns:repeat(2,1fr)}.secondary-row>:last-child{grid-column:span 2}.report-grid{grid-template-columns:repeat(2,1fr)}.patient-charts{grid-template-columns:1fr 1fr}.patient-charts>:last-child{grid-column:span 2}.ai-layout{grid-template-columns:1fr}.ai-chat-wrap .chat-panel{height:500px}}@media(max-width:800px){.sidebar{transform:translateX(-100%);transition:transform .25s}.sidebar.open{transform:translateX(0)}.workspace{margin-left:0}.mobile-overlay{position:fixed;inset:0;z-index:19;display:block;background:rgba(17,32,34,.42);backdrop-filter:blur(2px)}.mobile-menu{display:block}.topbar{height:60px;padding:0 18px}.global-search{display:none}.demo-pill,.profile>div:not(.avatar),.profile>svg{display:none}.profile{padding-left:8px}.content{padding:23px 17px 38px}.page-heading{align-items:flex-start;flex-direction:column}.filters{width:100%;overflow-x:auto}.metric-grid,.secondary-row,.data-overview-grid,.patient-charts,.segment-grid{grid-template-columns:1fr}.secondary-row>:last-child,.patient-charts>:last-child{grid-column:auto}.patient-banner{grid-template-columns:1fr 1fr;gap:20px}.patient-banner>div:first-child{grid-column:span 2}.banner-stat{padding-left:0;border-left:0}.report-grid{grid-template-columns:1fr}.pipeline-steps{grid-template-columns:1fr;gap:10px}.pipeline-step{align-items:flex-start;padding-left:50px;text-align:left}.pipeline-step>span{position:absolute;left:0}.pipeline-step:not(:last-child)::after{left:19px;top:40px;width:1px;height:calc(100% - 30px);border-top:0;border-left:1px dashed #bad3d0}.gender-chart-wrap{grid-template-columns:1fr}.gender-legend{grid-template-columns:repeat(3,1fr)}.gender-legend span{grid-template-columns:7px 1fr}.gender-legend strong{grid-column:2}.report-toolbar{align-items:flex-start;gap:10px;flex-direction:column}.report-tabs{max-width:100%;overflow-x:auto}.ai-layout{display:block}.ai-result-wrap{margin-top:15px}.quick-facts{grid-template-columns:1fr}.page-heading h1{font-size:22px}}@media(max-width:480px){.metric-grid{grid-template-columns:1fr}.metric-card{padding-left:68px}.filters label:first-child{display:none}.patient-banner{grid-template-columns:1fr}.patient-banner>div:first-child{grid-column:auto}.quality-score-card{align-items:flex-start;flex-direction:column}.report-tabs button{white-space:nowrap}.gender-legend{grid-template-columns:1fr}.topbar-actions{gap:5px}.content{padding-inline:12px}}
 </style>
 
 <style>
+.filters select:disabled{cursor:wait;opacity:.58}
+.filter-loading{display:inline-flex!important;align-items:center;gap:5px!important;margin:0!important;color:#39817a!important;font-size:9px!important;white-space:nowrap}
+.filter-loading svg{animation:filter-spin .8s linear infinite}
+@keyframes filter-spin{to{transform:rotate(360deg)}}
 .cost-layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.75fr);gap:15px;align-items:start}
 .cost-form-panel{padding:21px 23px}.model-badge{padding:5px 8px;color:#277d75;background:#e7f5f2;border-radius:6px;font-size:9px;font-weight:700}
 .cost-form-section{margin-top:18px;padding-top:16px;border-top:1px solid #edf0f1}.cost-form-section:first-child{margin-top:8px;padding-top:0;border-top:0}.cost-form-section h3{margin-bottom:12px;color:#41535c;font-size:11px}

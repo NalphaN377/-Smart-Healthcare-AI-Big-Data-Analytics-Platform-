@@ -20,7 +20,23 @@ let observer
 
 function render() {
   if (!chart || !props.option) return
-  chart.setOption(props.option, { notMerge: true })
+  const isAiCartesianChart = Boolean(
+    props.option.toolbox && (props.option.xAxis || props.option.yAxis),
+  )
+  const safeAiGrid = (grid = {}) => ({
+    ...grid,
+    left: typeof grid.left === 'number' ? Math.max(grid.left, 88) : (grid.left || 88),
+    containLabel: false,
+  })
+  const option = isAiCartesianChart
+    ? {
+        ...props.option,
+        grid: Array.isArray(props.option.grid)
+          ? props.option.grid.map((grid) => safeAiGrid(grid))
+          : safeAiGrid(props.option.grid),
+      }
+    : props.option
+  chart.setOption(option, { notMerge: true })
 }
 
 onMounted(() => {

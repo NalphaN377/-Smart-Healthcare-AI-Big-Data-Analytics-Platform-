@@ -1,6 +1,19 @@
 from app.service_layer.analysis import aggregation, dashboard_stats
 
 
+def test_year_range_uses_parameterized_bounds():
+    clause, params = aggregation._filter_clause({"year_from": "2021", "year_to": "2024"})
+    assert "(discharge_year) >=" in clause
+    assert "(discharge_year) <=" in clause
+    assert params == [2021, 2024]
+
+
+def test_named_disease_filter_is_parameterized():
+    clause, params = aggregation._filter_clause({"disease": "Septicemia"})
+    assert "ccsr_diagnosis_description" in clause
+    assert params == ["SEPTICEMIA"]
+
+
 def test_preaggregated_dimension_contract(monkeypatch):
     calls = []
 
@@ -34,7 +47,7 @@ def test_stale_stats_fall_back_to_business_table(monkeypatch):
 
     monkeypatch.setattr(aggregation, "_run_query", query)
     result = aggregation.aggregate("gender", ["count"])
-    assert "engine" not in result
+    assert result["engine"] == "sqlserver_live"
     assert any("FROM dbo.inpatient_discharge" in sql for sql in queries)
 
 

@@ -26,7 +26,8 @@ async function request(url, options = {}) {
   return payload
 }
 
-export function authLogin(username, password) { return request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }), skipAuthRedirect: true }) }
+export function authCaptcha() { return request('/auth/captcha', { skipAuthRedirect: true }) }
+export function authLogin(username, password, captcha) { return request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password, captcha }), skipAuthRedirect: true }) }
 export function authRegister(payload) { return request('/auth/register', { method: 'POST', body: JSON.stringify(payload), skipAuthRedirect: true }) }
 export function authLogout() { return request('/auth/logout', { method: 'POST' }) }
 export function authMe() { return request('/auth/me', { skipAuthRedirect: true }) }
@@ -41,6 +42,10 @@ export function adminHealth() { return request('/admin/system/health') }
 export function auditLogs(limit = 100) { return request(`/admin/audit-logs?limit=${limit}`) }
 export function publicReports() { return request('/reports/public') }
 export function publishReport(id) { return request(`/admin/reports/${id}/publish`, { method: 'PUT' }) }
+export function withdrawReport(id) { return request(`/admin/reports/${id}/withdraw`, { method: 'PUT' }) }
+export function listNotifications(limit = 50) { return request(`/notifications?limit=${limit}`) }
+export function markNotificationRead(id) { return request(`/notifications/${id}/read`, { method: 'PUT' }) }
+export function markAllNotificationsRead() { return request('/notifications/read-all', { method: 'PUT' }) }
 
 function queryString(params = {}) {
   const search = new URLSearchParams()

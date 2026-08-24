@@ -20,8 +20,8 @@ export async function refreshAuth() {
   return bootstrapAuth()
 }
 
-export async function login(username, password) {
-  const response = await authLogin(username, password)
+export async function login(username, password, captcha) {
+  const response = await authLogin(username, password, captcha)
   applyAuth(response.data)
   state.ready = true
   return state.user

@@ -29,6 +29,9 @@ TEXT_EXPRESSIONS = {
     if name not in {"length_of_stay", "discharge_year", "apr_severity_of_illness_code", "birth_weight", "total_charges", "total_costs"}
 }
 TEXT_EXPRESSIONS.update({
+    "facility_name": "NULLIF(LTRIM(RTRIM(REPLACE([facility_name], '`', ''''))), '')",
+    "age_group": "CASE WHEN LTRIM(RTRIM([age_group])) IN ('0 to 17','0-17') THEN '0-17' WHEN LTRIM(RTRIM([age_group])) IN ('18 to 29','18-29') THEN '18-29' WHEN LTRIM(RTRIM([age_group])) IN ('30 to 49','30-49') THEN '30-49' WHEN LTRIM(RTRIM([age_group])) IN ('50 to 69','50-69') THEN '50-69' WHEN LTRIM(RTRIM([age_group])) IN ('70 or Older','70 and Older','70+') THEN '70+' ELSE NULLIF(LTRIM(RTRIM([age_group])), '') END",
+    "hospital_service_area": "CASE WHEN LTRIM(RTRIM([hospital_service_area]))='Capital/Adirond' THEN 'Capital/Adirondacks' ELSE NULLIF(LTRIM(RTRIM([hospital_service_area])), '') END",
     "length_of_stay": "CASE WHEN TRY_CONVERT(INT, REPLACE([length_of_stay], ' +', '')) >= 0 THEN TRY_CONVERT(INT, REPLACE([length_of_stay], ' +', '')) END",
     "discharge_year": "TRY_CONVERT(SMALLINT, [discharge_year])",
     "apr_severity_of_illness_code": "TRY_CONVERT(TINYINT, [apr_severity_of_illness_code])",

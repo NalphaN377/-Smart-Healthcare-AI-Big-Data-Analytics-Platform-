@@ -1,0 +1,97 @@
+digraph SmartHealthcareArchitecture {
+  graph [
+    rankdir=TB,
+    bgcolor="#FFFFFF",
+    pad="0.42",
+    nodesep="0.42",
+    ranksep="0.50 equally",
+    splines=ortho,
+    newrank=true,
+    fontname="Microsoft YaHei",
+    fontsize=22,
+    fontcolor="#16324F",
+    label="智慧医疗大数据与 AI 大模型分析平台——系统架构图\n ",
+    labelloc=t
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Microsoft YaHei",
+    fontsize=12,
+    fontcolor="#17324D",
+    color="#AFC4D7",
+    penwidth=1.4,
+    width=7.2,
+    height=0.82,
+    margin="0.24,0.14"
+  ];
+  edge [color="#6886A0", penwidth=1.45, arrowsize=0.75];
+
+  users [
+    label="使用者\n医疗运营人员 · 管理人员 · 数据分析人员",
+    fillcolor="#E8F2FA",
+    color="#7BA9CC"
+  ];
+
+  presentation [
+    label="展示层\nVue 3 · ECharts · 运营大屏 · 智能问答",
+    fillcolor="#F0F9FF",
+    color="#38BDF8"
+  ];
+
+  api [
+    label="接口与 Web 服务层\nFlask · REST API · SSE 流式服务 · CORS",
+    fillcolor="#EFF6FF",
+    color="#60A5FA"
+  ];
+
+  core [
+    label="分析服务与 AI 智能层\n多维聚合 · 意图识别 · 图表配置 · 洞察报告",
+    fillcolor="#F5F3FF",
+    color="#A78BFA"
+  ];
+
+  data [
+    label="数据处理与访问层\n批量接入 · 清洗去重 · 质量评估 · 存储访问",
+    fillcolor="#ECFDF5",
+    color="#34D399"
+  ];
+
+  storage [
+    label="数据源与存储层\nSPARCS 脱敏 CSV · SQL Server 业务表与审计表",
+    fillcolor="#FFF7ED",
+    color="#FB923C"
+  ];
+
+  deepseek [
+    label="外部模型服务\nDeepSeek V4 Flash",
+    fillcolor="#FFF7ED",
+    color="#FDBA74",
+    width=2.55,
+    height=0.72,
+    fontsize=10.5
+  ];
+
+  phase2 [
+    label="二期预留：Redis · Spark · 预测模型 · 本地大模型 · 备份恢复",
+    style="rounded,dashed,filled",
+    fillcolor="#F8FAFC",
+    color="#CBD5E1",
+    fontcolor="#64748B",
+    width=7.2,
+    height=0.58,
+    fontsize=10.5
+  ];
+
+  users -> presentation;
+  presentation -> api;
+  api -> core;
+  core -> data;
+  data -> storage;
+
+  { rank=same; core; deepseek; }
+  core -> deepseek [dir=both, constraint=false, color="#D09A58"];
+
+  storage -> phase2 [style=invis, weight=20];
+}

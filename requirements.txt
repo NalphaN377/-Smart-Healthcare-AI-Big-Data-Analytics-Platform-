@@ -1,0 +1,31 @@
+# -*- coding: utf-8 -*-
+# 智慧医疗大数据与 AI 大模型分析平台 - Python 依赖
+
+# 数据处理与 SQL Server 持久化
+pandas>=2.0,<3.0
+numpy>=1.24,<3.0
+pymssql>=2.3,<3.0
+pyodbc>=5.1,<6.0       # 可选 ODBC 后端；本项目默认使用 pymssql/FreeTDS
+python-dotenv>=1.0,<2.0
+
+# Web 服务
+Flask>=3.0,<4.0
+Flask-Cors>=4.0,<7.0
+
+# DeepSeek Anthropic 兼容 API（流式输出）
+anthropic>=0.45,<1.0
+
+# 测试
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<7.0
+
+# 二期基础设施
+redis>=5.0,<7.0
+
+# 二期机器学习
+scikit-learn>=1.4,<2.0
+
+# 二期按需启用：
+# pyspark>=3.5,<4.0
+# fastapi>=0.110,<1.0
+# uvicorn>=0.27,<1.0

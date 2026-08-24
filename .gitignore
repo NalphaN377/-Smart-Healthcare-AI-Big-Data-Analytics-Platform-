@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv311/
+.python311/
+.downloads/
+.conda-pkgs/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# 环境变量（含密钥，勿提交）
+.env
+
+# 数据文件（原始数据集体积大，通常不入库；如用 Git LFS 可单独处理）
+data/raw/*
+data/processed/*
+data/backup/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/backup/.gitkeep
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/*.png
+frontend/.npm-cache/
+.edge-test-profile*/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志
+logs/
+*.log
+
+# 本地测试 / 覆盖率
+.coverage
+htmlcov/

@@ -62,6 +62,75 @@ def test_data_quality_contract(monkeypatch):
     assert payload["data"]["quality"]["overall"] == 0.99
 
 
+def test_field_quality_contract_uses_single_annual_aggregation(monkeypatch):
+    from app.service_layer.analysis import field_quality
+    from app.service_layer.api import routes
+
+    captured = {}
+    row = {"year": 2024, "records": 100}
+    for index, _spec in enumerate(field_quality.FIELDS):
+        row[f"f{index}_applicable"] = 100
+        row[f"f{index}_present"] = 98
+        row[f"f{index}_valid"] = 97
+    monkeypatch.setattr(
+        aggregation, "_run_query",
+        lambda sql, *_args, **_kwargs: captured.update(sql=sql) or [row],
+    )
+    monkeypatch.setattr(routes.cache, "remember", lambda _namespace, _payload, producer, **_kwargs: (producer(), False))
+    client = authenticated_client(monkeypatch, "doctor")
+    payload = client.get("/api/data-quality/fields").get_json()["data"]
+
+    assert payload["field_count"] == 33
+    assert payload["years"] == [2024]
+    assert payload["fields"][0]["score_pct"] == 98.49
+    procedure = next(item for item in payload["fields"] if item["field"] == "ccsr_procedure_code")
+    assert procedure["conditional"] is True
+    assert procedure["score_pct"] is None
+    assert "GROUP BY discharge_year" in captured["sql"]
+
+
+def test_report_library_is_scoped_to_current_user(monkeypatch):
+    class Cursor:
+        description = [(name,) for name in ("id", "title", "status", "created_by", "author", "published_at", "created_at", "updated_at")]
+
+        def execute(self, sql, params=()):
+            self.sql, self.params = sql, params
+
+        def fetchall(self):
+            return [(7, "我的报告", "draft", 1, "测试用户", None, None, None)]
+
+    class Connection:
+        def __init__(self): self.cursor_value = Cursor()
+        def cursor(self): return self.cursor_value
+        def close(self): pass
+
+    connection = Connection()
+    monkeypatch.setattr(storage, "get_connection", lambda: connection)
+    client = authenticated_client(monkeypatch, "doctor")
+    response = client.get("/api/reports?limit=20")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"][0]["title"] == "我的报告"
+    assert "r.created_by" in connection.cursor_value.sql
+    assert connection.cursor_value.params == (1,)
+
+
+def test_report_detail_cannot_cross_accounts(monkeypatch):
+    class Cursor:
+        description = []
+        def execute(self, _sql, _params=()): pass
+        def fetchone(self): return None
+
+    class Connection:
+        def cursor(self): return Cursor()
+        def close(self): pass
+
+    monkeypatch.setattr(storage, "get_connection", Connection)
+    client = authenticated_client(monkeypatch, "doctor")
+    response = client.get("/api/reports/99")
+    assert response.status_code == 404
+
+
 def test_sse_chat_has_context_delta_and_done(monkeypatch):
     from app.ai_layer import conversation as conversations
 
@@ -110,6 +179,44 @@ def test_sse_concept_question_uses_knowledge_rag(monkeypatch):
     assert context["direct_answer"] is None
     assert context["knowledge_sources"] == ["费用与成本口径"]
     assert "Total Charges" in body
+
+
+def test_sse_comparison_context_bypasses_knowledge_search(monkeypatch):
+    from app.ai_layer import agent as agent_module
+    from app.ai_layer import conversation as conversations
+    from app.service_layer.analysis import comparison
+
+    client = authenticated_client(monkeypatch, "patient")
+    monkeypatch.setattr(conversations, "resolve", lambda *_args, **_kwargs: {"public_id": "00000000-0000-0000-0000-000000000001"})
+    monkeypatch.setattr(conversations, "history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(conversations, "append_message", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(comparison, "trusted_comparison", lambda *_args, **_kwargs: {
+        "analysis_type": "trusted_pair_comparison", "dimension": "service_area",
+        "metrics": ["count"], "filters": {}, "rows": [
+            {"service_area": "New York City", "count": 20},
+            {"service_area": "Long Island", "count": 10},
+        ],
+    })
+    monkeypatch.setitem(LLM_CONFIG, "api_key", "")
+    monkeypatch.setattr(agent_module, "_agent", agent_module.MedicalAgent(use_llm_intent=False))
+
+    response = client.post(
+        "/api/chat/stream",
+        json={
+            "query": "解读区域差异",
+            "analysis_context": {"kind": "comparison", "comparison_type": "region", "a": "New York City", "b": "Long Island", "filters": {}},
+        },
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+    body = response.get_data(as_text=True)
+    context_block = next(block for block in body.split("\n\n") if "event: context" in block)
+    context_line = next(line for line in context_block.splitlines() if line.startswith("data: "))
+    context = json.loads(context_line[6:])
+
+    assert response.status_code == 200
+    assert context["answer_mode"] == "structured"
+    assert context["intent"]["source"] == "trusted_comparison_context"
+    assert context["data"]["rows"][0]["count"] == 20
 
 
 def test_sse_unsupported_question_has_no_chart_or_data_query(monkeypatch):

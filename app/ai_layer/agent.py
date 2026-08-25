@@ -100,6 +100,25 @@ class MedicalAgent:
         )
         return self._context(intent, role, data=data, chart=chart, knowledge=knowledge, answer_mode="structured")
 
+    def prepare_comparison(self, query: str, role: str, spec: dict) -> dict:
+        """使用服务端重新聚合的 A/B 指标生成比较解读上下文。"""
+        from app.service_layer.analysis.comparison import trusted_comparison
+
+        data = trusted_comparison(
+            spec.get("comparison_type"), spec.get("a"), spec.get("b"),
+            filters=spec.get("filters") or {}, role=role,
+        )
+        intent = {
+            "query": query,
+            "status": "ready",
+            "dimension": data["dimension"],
+            "metrics": data["metrics"],
+            "filters": data["filters"],
+            "chart_requested": False,
+            "source": "trusted_comparison_context",
+        }
+        return self._context(intent, role, data=data, chart=None, knowledge=[], answer_mode="structured")
+
     @staticmethod
     def _context(
         intent: dict, role: str, data: dict, chart, direct_answer: str | None = None,

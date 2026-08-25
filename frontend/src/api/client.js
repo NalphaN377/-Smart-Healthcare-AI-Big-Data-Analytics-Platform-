@@ -60,6 +60,7 @@ export function health() { return request('/health') }
 export function metadata() { return request('/metadata') }
 export function overview(filters = {}) { return request(`/overview${queryString(filters)}`) }
 export function dataQuality() { return request('/data-quality') }
+export function fieldQuality() { return request('/data-quality/fields') }
 export function yearTrend(filters = {}) { return request(`/year_trend${queryString(filters)}`) }
 export function paymentRatio(filters = {}) { return request(`/payment_ratio${queryString(filters)}`) }
 export function dimensionValues(dimension, limit = 100) { return request(`/dimensions/${dimension}/values?limit=${limit}`) }
@@ -96,14 +97,16 @@ export function chat(query) {
 export function createReport(payload = {}) {
   return request('/reports', { method: 'POST', body: JSON.stringify(payload) })
 }
+export function listReports(limit = 50) { return request(`/reports?limit=${limit}`) }
+export function getReport(id) { return request(`/reports/${id}`) }
 
 /** 读取 Flask SSE 流。callbacks: context / delta / done / error */
-export async function streamChat(query, callbacks = {}, conversationId = null) {
+export async function streamChat(query, callbacks = {}, conversationId = null, analysisContext = null) {
   const response = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-    body: JSON.stringify({ query, conversation_id: conversationId }),
+    body: JSON.stringify({ query, conversation_id: conversationId, analysis_context: analysisContext }),
   })
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => null)

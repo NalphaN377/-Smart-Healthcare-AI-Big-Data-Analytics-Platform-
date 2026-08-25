@@ -260,6 +260,20 @@ def data_quality():
     return success({"latest_ingestion": run, "quality": (run or {}).get("quality") or {}})
 
 
+@api.get("/data-quality/fields")
+@timing()
+@permission_required("data_asset:read")
+def data_quality_fields():
+    from app.service_layer.analysis.field_quality import field_quality_matrix
+
+    # 两个获授权角色看到相同的非患者级字段统计，共享缓存可避免850万行重复扫描。
+    data, hit = cache.remember("field_quality_matrix", {"scope": "data_asset"}, field_quality_matrix, ttl=86400)
+    return success(data, meta={
+        "cache_enabled": bool(FEATURES.get("redis_cache")), "cache_hit": hit,
+        "data_version": cache.data_version() if FEATURES.get("redis_cache") else None,
+    })
+
+
 @api.post("/chat")
 @timing()
 @login_required
@@ -299,7 +313,24 @@ def chat_stream():
     try:
         conversation = conversations.resolve(user["id"], body.get("conversation_id"), query)
         history = conversations.history(user["id"], conversation["public_id"])
-        context = agent.prepare(query, user["role"], history or _chat_history(body))
+        analysis_context = body.get("analysis_context")
+        if analysis_context is not None:
+            if not isinstance(analysis_context, dict) or analysis_context.get("kind") != "comparison":
+                raise ValueError("analysis_context 格式无效")
+            filters = analysis_context.get("filters") or {}
+            if not isinstance(filters, dict):
+                raise ValueError("analysis_context.filters 必须是对象")
+            spec = {
+                "comparison_type": str(analysis_context.get("comparison_type") or "")[:20],
+                "a": analysis_context.get("a"),
+                "b": analysis_context.get("b"),
+                "filters": filters,
+            }
+            if any(len(str(spec[key] or "")) > 200 for key in ("a", "b")):
+                raise ValueError("比较对象名称过长")
+            context = agent.prepare_comparison(query, user["role"], spec)
+        else:
+            context = agent.prepare(query, user["role"], history or _chat_history(body))
         context["conversation_id"] = conversation["public_id"]
         conversations.append_message(
             user["id"], conversation["public_id"], "user", query, request_id=context["request_id"],
@@ -398,6 +429,62 @@ def reports():
         conn.close()
     auth_service.audit(current_user(), "report.generate", str(report_id), **_request_context())
     return success({"id": report_id, "title": title, "status": "draft", "format": "markdown", "content": content})
+
+
+def _report_row(cursor, row, *, include_content=False):
+    item = dict(zip([column[0] for column in cursor.description], row))
+    for key in ("published_at", "created_at", "updated_at"):
+        if item.get(key):
+            item[key] = item[key].isoformat()
+    if not include_content:
+        item.pop("content", None)
+    return item
+
+
+@api.get("/reports")
+@timing()
+@permission_required("report:generate")
+def report_library():
+    user = current_user()
+    limit = _limit(50)
+    conn = storage.get_connection()
+    try:
+        cursor = conn.cursor()
+        where, params = ("", ()) if user["role"] == "admin" else (f"WHERE r.created_by={storage.PARAM}", (user["id"],))
+        cursor.execute(
+            f"SELECT TOP {limit} r.id,r.title,r.status,r.created_by,"
+            "COALESCE(NULLIF(u.display_name,N''),u.username) AS author,r.published_at,r.created_at,r.updated_at "
+            "FROM dbo.analysis_report r JOIN dbo.users u ON u.id=r.created_by "
+            f"{where} ORDER BY r.updated_at DESC,r.id DESC",
+            params,
+        )
+        return success([_report_row(cursor, row) for row in cursor.fetchall()])
+    finally:
+        conn.close()
+
+
+@api.get("/reports/<int:report_id>")
+@timing()
+@permission_required("report:generate")
+def report_detail(report_id):
+    user = current_user()
+    conn = storage.get_connection()
+    try:
+        cursor = conn.cursor()
+        owner_clause, params = ("", (report_id,)) if user["role"] == "admin" else (f" AND r.created_by={storage.PARAM}", (report_id, user["id"]))
+        cursor.execute(
+            "SELECT r.id,r.title,r.content,r.status,r.created_by,"
+            "COALESCE(NULLIF(u.display_name,N''),u.username) AS author,r.published_at,r.created_at,r.updated_at "
+            "FROM dbo.analysis_report r JOIN dbo.users u ON u.id=r.created_by "
+            f"WHERE r.id={storage.PARAM}{owner_clause}",
+            params,
+        )
+        row = cursor.fetchone()
+        if not row:
+            return fail("报告不存在或无权查看", code=404), 404
+        return success(_report_row(cursor, row, include_content=True))
+    finally:
+        conn.close()
 
 
 @api.get("/reports/public")

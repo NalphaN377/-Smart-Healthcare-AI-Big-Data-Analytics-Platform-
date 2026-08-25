@@ -15,7 +15,10 @@ from typing import Optional
 
 from app.ai_layer.chart_gen import generate_chart_option
 from app.ai_layer.intent import detect_intent, detect_intent_with_llm
-from app.ai_layer.text_gen import generate_summary, stream_summary
+from app.ai_layer.knowledge import retrieve
+from app.ai_layer.text_gen import (
+    generate_knowledge_answer, generate_summary, stream_knowledge_answer, stream_summary,
+)
 from config import FEATURES, LLM_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -40,12 +43,28 @@ class MedicalAgent:
         """
         # 1. 意图识别
         context = self.prepare(query, role, history)
-        summary = context.get("direct_answer") or generate_summary(context["data"], query, role)
+        if context.get("direct_answer"):
+            summary = context["direct_answer"]
+        elif context.get("answer_mode") == "knowledge":
+            summary = generate_knowledge_answer(context.get("knowledge") or [], query, role)
+        else:
+            summary = generate_summary(context["data"], query, role, context.get("knowledge"))
         return {**context, "summary": summary}
 
     def prepare(self, query: str, role: str = "doctor", history: list[dict] | None = None) -> dict:
         """准备流式/非流式请求共享的结构化分析上下文。"""
         intent = detect_intent_with_llm(query, history) if self.use_llm_intent else detect_intent(query)
+        knowledge = retrieve(query, role)
+
+        if intent.get("status") == "ready" and intent.get("topic"):
+            from app.service_layer.analysis import mining
+
+            data = mining.topic_analysis(
+                intent["topic"], role=role, filters=intent.get("filters"), limit=intent.get("limit", 100),
+                dimension=intent.get("dimension"), metrics=intent.get("metrics"),
+            )
+            chart = generate_chart_option(data, intent.get("chart_type", "bar"))
+            return self._context(intent, role, data=data, chart=chart, knowledge=knowledge, answer_mode="structured")
 
         if role == "patient" and intent.get("status") == "ready":
             allowed_dimensions = {"disease", "year", "service_area"}
@@ -59,7 +78,17 @@ class MedicalAgent:
                 }
 
         if intent.get("status") != "ready":
-            return self._context(intent, role, data={"rows": []}, chart=None, direct_answer=intent.get("message"))
+            message = str(intent.get("message") or "")
+            medical_block = "专业医务人员" in message or "个人症状" in message
+            if knowledge and not medical_block:
+                return self._context(
+                    intent, role, data={"rows": []}, chart=None,
+                    knowledge=knowledge, answer_mode="knowledge",
+                )
+            return self._context(
+                intent, role, data={"rows": []}, chart=None,
+                direct_answer=message, knowledge=[], answer_mode="direct",
+            )
 
         # 2. 调用服务层获取数据
         data = self._fetch_data(intent, role)
@@ -69,10 +98,13 @@ class MedicalAgent:
             generate_chart_option(data, intent["chart_type"], value_field=intent.get("sort_by"))
             if intent.get("chart_requested") else None
         )
-        return self._context(intent, role, data=data, chart=chart)
+        return self._context(intent, role, data=data, chart=chart, knowledge=knowledge, answer_mode="structured")
 
     @staticmethod
-    def _context(intent: dict, role: str, data: dict, chart, direct_answer: str | None = None) -> dict:
+    def _context(
+        intent: dict, role: str, data: dict, chart, direct_answer: str | None = None,
+        knowledge: list[dict] | None = None, answer_mode: str = "structured",
+    ) -> dict:
         return {
             "request_id": uuid.uuid4().hex,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -80,6 +112,9 @@ class MedicalAgent:
             "data": data,
             "chart": chart,
             "direct_answer": direct_answer,
+            "answer_mode": answer_mode,
+            "knowledge": knowledge or [],
+            "knowledge_sources": [item.get("title") for item in (knowledge or [])],
             "model": LLM_CONFIG["model"],
             "audience": role,
         }
@@ -89,7 +124,15 @@ class MedicalAgent:
         if context.get("direct_answer"):
             yield context["direct_answer"]
             return
-        yield from stream_summary(context["data"], context["intent"]["query"], context.get("audience", "doctor"))
+        if context.get("answer_mode") == "knowledge":
+            yield from stream_knowledge_answer(
+                context.get("knowledge") or [], context["intent"]["query"], context.get("audience", "doctor"),
+            )
+            return
+        yield from stream_summary(
+            context["data"], context["intent"]["query"], context.get("audience", "doctor"),
+            context.get("knowledge"),
+        )
 
     def _fetch_data(self, intent: dict, role: str = "doctor") -> dict:
         """根据意图调用服务层聚合分析（对应「智能工具调用」）。"""
@@ -104,11 +147,16 @@ class MedicalAgent:
             if dimension not in allowed_dimensions or not set(metrics) <= allowed_metrics:
                 raise ValueError("患者用户仅可查询公开疾病趋势、年度趋势和服务区域概览")
             intent["limit"] = min(int(intent.get("limit", 10)), 10)
-            intent["filters"] = {key: value for key, value in (intent.get("filters") or {}).items() if key in {"year", "service_area"}}
+            intent["filters"] = {
+                key: value for key, value in (intent.get("filters") or {}).items()
+                if key in {"year", "year_from", "year_to", "disease", "service_area"}
+            }
 
         # 支付方式占比走专门接口（带 ratio）
         if dimension == "payment" and set(metrics) <= {"count"}:
-            return aggregation.payment_ratio(limit=intent.get("limit", 20), filters=intent.get("filters"))
+            return aggregation.payment_ratio(
+                limit=intent.get("limit", 20), filters=intent.get("filters"), role=role,
+            )
 
         data = aggregation.aggregate(
             dimension,
@@ -117,6 +165,7 @@ class MedicalAgent:
             filters=intent.get("filters"),
             sort_by=intent.get("sort_by"),
             sort_order=intent.get("sort_order", "desc"),
+            role=role,
         )
         if role == "patient" and isinstance(data.get("rows"), list):
             data["rows"] = [row for row in data["rows"] if int(row.get("count") or 0) >= 11]

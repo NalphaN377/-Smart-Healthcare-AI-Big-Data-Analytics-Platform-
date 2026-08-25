@@ -342,6 +342,28 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.user_notification', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.user_notification (
+        id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_user_notification PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        notification_type NVARCHAR(40) NOT NULL
+            CONSTRAINT ck_user_notification_type CHECK (notification_type IN ('report_published')),
+        title NVARCHAR(160) NOT NULL,
+        message NVARCHAR(500) NOT NULL,
+        report_id BIGINT NOT NULL,
+        is_read BIT NOT NULL CONSTRAINT df_user_notification_read DEFAULT 0,
+        read_at DATETIME2(0) NULL,
+        created_at DATETIME2(0) NOT NULL CONSTRAINT df_user_notification_created DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT fk_user_notification_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
+        CONSTRAINT fk_user_notification_report FOREIGN KEY (report_id) REFERENCES dbo.analysis_report(id),
+        CONSTRAINT uq_user_notification_report UNIQUE (user_id, notification_type, report_id)
+    );
+    CREATE INDEX idx_user_notification_inbox
+        ON dbo.user_notification(user_id, is_read, created_at DESC);
+END;
+GO
+
 IF OBJECT_ID(N'dbo.ai_conversation', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ai_conversation (

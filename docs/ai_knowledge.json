@@ -1,0 +1,100 @@
+[
+  {
+    "id": "platform_scope",
+    "title": "平台数据范围",
+    "content": "平台分析对象是SPARCS去标识化住院出院记录，支持疾病、疾病编码、年龄组、医院、县、服务区域、年份、支付方式、性别、入院类型、严重程度、死亡风险和离院去向等维度。动态记录数和覆盖年份必须以SQL查询结果为准。",
+    "keywords": ["平台数据", "数据范围", "有哪些数据", "支持什么", "分析维度", "SPARCS", "住院出院记录"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "metric_discharge_count",
+    "title": "出院人数与住院量口径",
+    "content": "平台中的出院人数、住院人数、住院量和出院量默认按去标识化住院出院记录条数统计，严格说属于出院人次而不是去重自然人数。同一患者无法跨记录识别，因此不能据此计算独立患者人数或再入院率。",
+    "keywords": ["出院人数", "住院人数", "住院量", "出院量", "人次", "记录数", "统计口径"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "metric_charges_costs",
+    "title": "费用与成本口径",
+    "content": "Total Charges表示医疗机构账单收费金额，Total Costs表示估算的资源成本，两者不是同一指标。平均费用是Total Charges的均值，总费用是其合计；平均成本和总成本则基于Total Costs计算。金额沿用源数据币种美元。",
+    "keywords": ["费用", "成本", "收费", "Total Charges", "Total Costs", "平均费用", "总费用", "区别", "美元"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "metric_length_of_stay",
+    "title": "住院日口径",
+    "content": "Length of Stay表示一次住院记录的住院天数。平均住院日是所选范围内有效住院日的算术平均值，可按疾病、年龄、医院、地区、年份等维度聚合。",
+    "keywords": ["住院日", "住院时长", "住院天数", "Length of Stay", "平均住院"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "ccsr_codes",
+    "title": "CCSR诊断与手术编码",
+    "content": "CCSR用于把ICD-10-CM诊断和ICD-10-PCS手术编码归并为更适合统计分析的临床类别。平台同时保存CCSR诊断编码、诊断描述、手术编码和手术描述，可用于疾病负担和手术结构分析。",
+    "keywords": ["CCSR", "诊断编码", "手术编码", "疾病编码", "ICD", "编码是什么意思"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "apr_grouping",
+    "title": "APR DRG、MDC与严重程度",
+    "content": "APR DRG用于按临床特征和资源消耗对住院病例分组，APR MDC表示主要疾病类别。APR严重程度通常分为Minor、Moderate、Major、Extreme，死亡风险字段是独立的风险分层，不能替代个人临床判断。",
+    "keywords": ["APR DRG", "APR MDC", "严重程度", "死亡风险", "Minor", "Moderate", "Major", "Extreme"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "data_quality",
+    "title": "数据质量口径",
+    "content": "数据质量从完整性、准确性、一致性、时效性和唯一性等方面评估。质量评分用于数据治理和运营参考，不代表医疗服务质量，也不能用于评价单个患者或医生。",
+    "keywords": ["数据质量", "完整性", "准确性", "一致性", "时效性", "唯一性", "质量评分"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "cost_prediction_scope",
+    "title": "住院费用预测模型范围",
+    "content": "费用预测模型基于已编码住院信息估算最终Total Costs，使用地区、人口特征、入院信息、CCSR、APR分组、支付方式、年份和住院日等特征。它不是入院前报价、患者结算金额、保险理赔结果或医疗建议。",
+    "keywords": ["费用预测", "成本预测", "机器学习模型", "预测模型", "怎么预测", "模型范围"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "privacy_safety",
+    "title": "隐私与医疗安全边界",
+    "content": "平台只分析去标识化聚合数据，不提供个人诊断、处方、治疗方案或用药建议。系统不应根据统计结果推断个体身份或个体病情；涉及个人症状时应咨询专业医务人员。",
+    "keywords": ["隐私", "去标识化", "个人诊断", "处方", "治疗", "用药", "医疗建议", "安全"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "financial_proxy_metrics",
+    "title": "收费与成本衍生指标口径",
+    "content": "Total Charges减Total Costs可计算收费—成本差额；成本收费比为成本合计除以收费合计；收费成本差额率是代理指标。由于数据没有净收入、保险折扣、坏账、补贴和期间费用，这些指标不能称为医院利润、毛利或净利润率。金额均为名义美元，未进行通胀调整。",
+    "keywords": ["利润率", "收费成本差额", "成本收费比", "收费成本倍数", "每日成本", "Total Charges", "Total Costs"],
+    "roles": ["doctor", "admin"]
+  },
+  {
+    "id": "cross_year_normalization",
+    "title": "2021—2024跨年标准化",
+    "content": "平台统一分析2021—2024四年数据。2024年的0-17、18-29、30-49、50-69已与此前年度的to写法合并，70 or Older统一展示为70+；Capital/Adirond统一为Capital/Adirondacks。跨年疾病比较优先使用CCSR编码，描述用于展示。",
+    "keywords": ["四年", "跨年", "年龄标签", "标签重复", "标准化", "2021", "2022", "2023", "2024"],
+    "roles": ["patient", "doctor", "admin"]
+  },
+  {
+    "id": "case_mix_benchmark",
+    "title": "病例组合校正医院基准",
+    "content": "病例组合校正成本指数按年度、APR DRG和严重程度分层计算预期成本，再用医院实际成本除以预期成本；住院日指数采用同样方法。指数用于运营基准，不是医疗质量评级，至少100条有效同类病例才展示。",
+    "keywords": ["病例组合校正", "医院成本指数", "医院效率", "预期成本", "DRG", "严重程度"],
+    "roles": ["admin"]
+  },
+  {
+    "id": "outcome_limits",
+    "title": "出院结局与风险分层边界",
+    "content": "Patient Disposition中的Expired可计算院内死亡去向粗比例，APR Risk of Mortality是风险分层。粗比例受年龄、疾病、严重程度和病例组合影响，不能直接作为医院质量排名，也不代表院外死亡或个人死亡风险。",
+    "keywords": ["院内死亡", "死亡率", "Expired", "出院结局", "风险分层", "死亡风险"],
+    "roles": ["doctor", "admin"]
+  },
+  {
+    "id": "conditional_fields",
+    "title": "条件适用字段口径",
+    "content": "CCSR手术编码为空可能表示没有适用的主要手术；Payment Typology 2和3只在多支付来源时适用；Birth Weight主要适用于新生儿记录。上述空值不能一概解释为数据质量缺失。",
+    "keywords": ["手术编码缺失", "第二支付方式", "第三支付方式", "出生体重", "空值", "完整率"],
+    "roles": ["doctor", "admin"]
+  }
+]

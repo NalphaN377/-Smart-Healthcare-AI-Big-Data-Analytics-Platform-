@@ -6,6 +6,7 @@ import platform
 
 from flask import Blueprint, Response, request, session, stream_with_context
 
+from app.auth import captcha
 from app.auth import service as auth_service
 from app.auth.permissions import ROLE_LABELS
 from app.auth.web import current_user, login_required, permission_required, start_session
@@ -13,6 +14,7 @@ from app.common import cache
 from app.common.response import fail, success, timing
 from app.data_layer import storage
 from app.service_layer.analysis import aggregation
+from app.service_layer.analysis import registry as analysis_registry
 from config import FEATURES, LLM_CONFIG
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -82,11 +84,20 @@ def login():
     password = str(body.get("password") or "")
     if not username or not password:
         return fail("请输入用户名和密码", code=400), 400
+    captcha_valid, captcha_message = captcha.verify(str(body.get("captcha") or ""))
+    if not captcha_valid:
+        return fail(captcha_message, code=400), 400
     user, message = auth_service.authenticate(username, password, **_request_context())
     if not user:
         return fail(message, code=401), 401
     csrf_token = start_session(user)
     return success({"user": user, "csrf_token": csrf_token}, message="登录成功")
+
+
+@api.get("/auth/captcha")
+@timing()
+def login_captcha():
+    return success(captcha.issue())
 
 
 @api.post("/auth/logout")
@@ -147,9 +158,10 @@ def health():
 @timing()
 @permission_required("data_asset:read")
 def metadata():
+    role = current_user()["role"]
     return success({
-        "dimensions": [{"key": key, "label": aggregation.DIMENSION_LABELS[key]} for key in aggregation.DIMENSIONS],
-        "metrics": list(aggregation.METRICS),
+        "dimensions": [{"key": key, "label": spec.label, "sensitive": spec.sensitive} for key, spec in analysis_registry.dimensions_for(role).items()],
+        "metrics": [{"key": key, "label": spec.label, "unit": spec.unit, "disclaimer": spec.disclaimer} for key, spec in analysis_registry.metrics_for(role).items()],
         "filters": list(aggregation.FILTERS),
         "phase2": [
             "redis_cache", "ml_cost_prediction", "disease_procedure_association",
@@ -187,7 +199,7 @@ def aggregate():
     filters = _filters()
     data, cache_meta = _cached(
         "aggregate",
-        lambda: aggregation.aggregate(dimension, metrics=metric_list, limit=limit, filters=filters),
+        lambda: aggregation.aggregate(dimension, metrics=metric_list, limit=limit, filters=filters, role=current_user()["role"]),
         extra={"dimension": dimension, "metrics": metric_list},
     )
     return success(data, meta={"dimension": dimension, **cache_meta})
@@ -199,7 +211,7 @@ def aggregate():
 def avg_length_of_stay():
     dimension = request.args.get("dimension", "age_group")
     limit, filters = _limit(), _filters()
-    data, cache_meta = _cached("avg_length_of_stay", lambda: aggregation.avg_length_of_stay_by(dimension, limit, filters))
+    data, cache_meta = _cached("avg_length_of_stay", lambda: aggregation.avg_length_of_stay_by(dimension, limit, filters, current_user()["role"]))
     return success(data, meta={"indicator": "平均住院日", "dimension": dimension, **cache_meta})
 
 
@@ -209,7 +221,7 @@ def avg_length_of_stay():
 def cost_distribution():
     dimension = request.args.get("dimension", "disease")
     limit, filters = _limit(), _filters()
-    data, cache_meta = _cached("cost_distribution", lambda: aggregation.cost_distribution(dimension, limit, filters))
+    data, cache_meta = _cached("cost_distribution", lambda: aggregation.cost_distribution(dimension, limit, filters, current_user()["role"]))
     return success(data, meta={"indicator": "住院费用", "dimension": dimension, **cache_meta})
 
 
@@ -218,7 +230,7 @@ def cost_distribution():
 @permission_required("patient_profile:read")
 def payment_ratio():
     limit, filters = _limit(), _filters()
-    data, cache_meta = _cached("payment_ratio", lambda: aggregation.payment_ratio(limit, filters))
+    data, cache_meta = _cached("payment_ratio", lambda: aggregation.payment_ratio(limit, filters, current_user()["role"]))
     return success(data, meta={"indicator": "支付方式占比", **cache_meta})
 
 
@@ -227,7 +239,7 @@ def payment_ratio():
 @permission_required("patient_profile:read")
 def year_trend():
     filters = _filters()
-    data, cache_meta = _cached("year_trend", lambda: aggregation.year_trend(filters))
+    data, cache_meta = _cached("year_trend", lambda: aggregation.year_trend(filters, current_user()["role"]))
     return success(data, meta={"indicator": "出院年份趋势", **cache_meta})
 
 
@@ -236,7 +248,7 @@ def year_trend():
 @permission_required("patient_profile:read")
 def dimension_values(dimension):
     limit = _limit(100)
-    values, cache_meta = _cached("dimension_values", lambda: aggregation.dimension_values(dimension, limit), extra={"dimension": dimension})
+    values, cache_meta = _cached("dimension_values", lambda: aggregation.dimension_values(dimension, limit, current_user()["role"]), extra={"dimension": dimension})
     return success({"dimension": dimension, "values": values}, meta=cache_meta)
 
 
@@ -292,6 +304,8 @@ def chat_stream():
         conversations.append_message(
             user["id"], conversation["public_id"], "user", query, request_id=context["request_id"],
         )
+    except PermissionError as exc:
+        return fail(str(exc), code=403), 403
     except (ValueError, LookupError) as exc:
         return fail(str(exc), code=400), 400
 
@@ -407,25 +421,108 @@ def public_reports():
         conn.close()
 
 
+@api.get("/notifications")
+@timing()
+@login_required
+def notifications():
+    from app.service_layer import notifications as notification_service
+
+    return success(notification_service.list_for_user(current_user()["id"], _limit(50)))
+
+
+@api.put("/notifications/<int:notification_id>/read")
+@timing()
+@login_required
+def read_notification(notification_id):
+    from app.service_layer import notifications as notification_service
+
+    if not notification_service.mark_read(current_user()["id"], notification_id):
+        return fail("通知不存在", code=404), 404
+    return success(message="通知已读")
+
+
+@api.put("/notifications/read-all")
+@timing()
+@login_required
+def read_all_notifications():
+    from app.service_layer import notifications as notification_service
+
+    changed = notification_service.mark_all_read(current_user()["id"])
+    return success({"updated": changed}, message="全部通知已读")
+
+
 @api.put("/admin/reports/<int:report_id>/publish")
 @timing()
 @permission_required("system:manage")
 def publish_report(report_id):
+    from app.service_layer import notifications as notification_service
+
     conn = storage.get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            f"UPDATE dbo.analysis_report SET status='published',published_at=SYSUTCDATETIME(),updated_at=SYSUTCDATETIME() WHERE id={storage.PARAM}",
+            f"SELECT title,status FROM dbo.analysis_report WITH (UPDLOCK,HOLDLOCK) WHERE id={storage.PARAM}",
             (report_id,),
         )
-        if cursor.rowcount == 0:
+        report = cursor.fetchone()
+        if not report:
             conn.rollback()
             return fail("报告不存在", code=404), 404
+        title, previous_status = report
+        notified = 0
+        if previous_status != "published":
+            cursor.execute(
+                "UPDATE dbo.analysis_report SET status='published',published_at=SYSUTCDATETIME(),"
+                f"updated_at=SYSUTCDATETIME() WHERE id={storage.PARAM}",
+                (report_id,),
+            )
+            notified = notification_service.enqueue_report_published(cursor, report_id, title)
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
     auth_service.audit(current_user(), "report.publish", str(report_id), **_request_context())
-    return success(message="报告已发布")
+    return success({"notifications_created": notified}, message="报告已发布")
+
+
+@api.put("/admin/reports/<int:report_id>/withdraw")
+@timing()
+@permission_required("system:manage")
+def withdraw_report(report_id):
+    conn = storage.get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT status FROM dbo.analysis_report WITH (UPDLOCK,HOLDLOCK) WHERE id={storage.PARAM}",
+            (report_id,),
+        )
+        report = cursor.fetchone()
+        if not report:
+            conn.rollback()
+            return fail("报告不存在", code=404), 404
+        if report[0] != "published":
+            conn.rollback()
+            return fail("该报告当前未发布", code=409), 409
+        cursor.execute(
+            f"DELETE FROM dbo.user_notification WHERE report_id={storage.PARAM}",
+            (report_id,),
+        )
+        removed_notifications = max(int(cursor.rowcount or 0), 0)
+        cursor.execute(
+            "UPDATE dbo.analysis_report SET status='draft',published_at=NULL,updated_at=SYSUTCDATETIME() "
+            f"WHERE id={storage.PARAM}",
+            (report_id,),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    auth_service.audit(current_user(), "report.withdraw", str(report_id), **_request_context())
+    return success({"notifications_removed": removed_notifications}, message="报告已撤回")
 
 
 @api.get("/admin/users")
@@ -504,6 +601,76 @@ def admin_audit_logs():
 @permission_required("system:manage")
 def phase2_cache_status():
     return success(cache.health())
+
+
+@api.get("/v2/analytics/catalog")
+@timing()
+@login_required
+def analytics_catalog():
+    role = current_user()["role"]
+    return success({
+        "years": [2021, 2022, 2023, 2024],
+        "dimensions": [
+            {"key": key, "label": spec.label, "min_count": max(spec.min_count, 11 if role == "patient" else 1),
+             "sensitive": spec.sensitive}
+            for key, spec in analysis_registry.dimensions_for(role).items()
+        ],
+        "metrics": [
+            {"key": key, "label": spec.label, "unit": spec.unit, "description": spec.description,
+             "disclaimer": spec.disclaimer}
+            for key, spec in analysis_registry.metrics_for(role).items()
+        ],
+    })
+
+
+@api.post("/v2/analytics/query")
+@timing()
+@login_required
+def analytics_query():
+    body = request.get_json(silent=True) or {}
+    dimensions = body.get("dimensions") or ([body.get("dimension")] if body.get("dimension") else [])
+    metrics = body.get("metrics") or ["count"]
+    if not isinstance(dimensions, list) or not isinstance(metrics, list):
+        raise ValueError("dimensions 和 metrics 必须是数组")
+    filters = body.get("filters") or {}
+    if not isinstance(filters, dict):
+        raise ValueError("filters 必须是对象")
+    role = current_user()["role"]
+    extra = {"dimensions": dimensions, "metrics": metrics, "filters": filters,
+             "sort_by": body.get("sort_by"), "sort_order": body.get("sort_order", "desc"),
+             "limit": body.get("limit", 20)}
+    data, cache_meta = _cached(
+        "analytics_query",
+        lambda: aggregation.aggregate(
+            dimensions, metrics, limit=int(body.get("limit", 20)), filters=filters,
+            sort_by=body.get("sort_by"), sort_order=body.get("sort_order", "desc"), role=role,
+        ),
+        extra=extra,
+    )
+    return success(data, meta=cache_meta)
+
+
+@api.post("/v2/analytics/topics/<topic>")
+@timing()
+@login_required
+def analytics_topic(topic):
+    from app.service_layer.analysis import mining
+
+    body = request.get_json(silent=True) or {}
+    filters = body.get("filters") or {}
+    if not isinstance(filters, dict):
+        raise ValueError("filters 必须是对象")
+    role = current_user()["role"]
+    extra = {"topic": topic, "filters": filters, "limit": body.get("limit", 100)}
+    data, cache_meta = _cached(
+        f"analytics_topic:{topic}",
+        lambda: mining.topic_analysis(
+            topic, role=role, filters=filters, limit=max(1, min(int(body.get("limit", 100)), 100)),
+            dimension=body.get("dimension"), metrics=body.get("metrics"),
+        ),
+        extra=extra,
+    )
+    return success(data, meta=cache_meta)
 
 
 @api.get("/v2/associations/disease-procedure")

@@ -3,29 +3,26 @@ from __future__ import annotations
 
 from app.data_layer import storage
 from app.data_layer.sql_tasks import run_long_sql
+from app.service_layer.analysis import registry
 
 ALL_SCOPE = "__ALL__"
 NULL_VALUE = "(未标注)"
 STAT_DIMENSIONS = {
-    "disease": "ccsr_diagnosis_description",
-    "age_group": "age_group",
-    "year": "discharge_year",
-    "payment": "payment_typology_1",
-    "gender": "gender",
-    "severity": "apr_severity_of_illness_desc",
+    key: registry.DIMENSIONS[key].expression
+    for key in ("disease", "age_group", "year", "payment", "gender", "severity")
 }
 
 
 def _scope_expression() -> str:
     return (
-        f"CASE WHEN GROUPING(hospital_service_area)=1 THEN N'{ALL_SCOPE}' "
-        f"ELSE COALESCE(hospital_service_area,N'{NULL_VALUE}') END"
+        f"CASE WHEN GROUPING({registry.SERVICE_AREA_SQL})=1 THEN N'{ALL_SCOPE}' "
+        f"ELSE ({registry.SERVICE_AREA_SQL}) END"
     )
 
 
-def _dimension_select(name: str, column: str) -> str:
+def _dimension_select(name: str, expression: str) -> str:
     scope = _scope_expression()
-    value = f"COALESCE(CONVERT(NVARCHAR(300),[{column}]),N'{NULL_VALUE}')"
+    value = f"COALESCE(CONVERT(NVARCHAR(300),({expression})),N'{NULL_VALUE}')"
     return f"""
 SELECT {scope} AS scope_service_area,N'{name}' AS dimension_name,{value} AS dimension_value,
        COUNT_BIG(*) AS record_count,
@@ -36,7 +33,7 @@ SELECT {scope} AS scope_service_area,N'{name}' AS dimension_name,{value} AS dime
        COALESCE(SUM(CONVERT(DECIMAL(38,2),total_costs)),0) AS total_costs_sum,
        COUNT_BIG(total_costs) AS total_costs_count
 FROM {storage.TABLE_NAME}
-GROUP BY GROUPING SETS (([{column}]),(hospital_service_area,[{column}]))
+GROUP BY GROUPING SETS ((({expression})),(({registry.SERVICE_AREA_SQL}),({expression})))
 """.strip()
 
 
@@ -64,7 +61,7 @@ SELECT {scope} AS scope_service_area,COUNT_BIG(*) AS discharges,
        COUNT_BIG(total_charges) AS total_charges_count
 INTO #summary_build
 FROM {storage.TABLE_NAME}
-GROUP BY GROUPING SETS ((),(hospital_service_area))
+GROUP BY GROUPING SETS ((),(({registry.SERVICE_AREA_SQL})))
 OPTION (MAXDOP 1, MAX_GRANT_PERCENT=5);
 
 CREATE TABLE #dimension_build (
@@ -80,7 +77,7 @@ SELECT {scope} AS scope_service_area,facility_name
 INTO #facility_build
 FROM {storage.TABLE_NAME}
 WHERE facility_name IS NOT NULL
-GROUP BY GROUPING SETS ((facility_name),(hospital_service_area,facility_name))
+GROUP BY GROUPING SETS ((facility_name),(({registry.SERVICE_AREA_SQL}),facility_name))
 OPTION (MAXDOP 1, MAX_GRANT_PERCENT=5);
 
 BEGIN TRANSACTION;
@@ -104,6 +101,11 @@ USING (SELECT N'analytics_data_version' AS state_key,CAST({int(data_version)} AS
 ON target.state_key=source.state_key
 WHEN MATCHED THEN UPDATE SET int_value=source.int_value,updated_at=SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT(state_key,int_value) VALUES(source.state_key,source.int_value);
+MERGE dbo.system_state AS target
+USING (SELECT N'analytics_schema_version' AS state_key,CAST(2 AS BIGINT) AS int_value) AS source
+ON target.state_key=source.state_key
+WHEN MATCHED THEN UPDATE SET int_value=source.int_value,updated_at=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT(state_key,int_value) VALUES(source.state_key,source.int_value);
 COMMIT TRANSACTION;
 """
     run_long_sql(sql)
@@ -124,9 +126,9 @@ COMMIT TRANSACTION;
     }
 
 
-def _batch_dimension_merge(name: str, column: str, run_id: int) -> str:
+def _batch_dimension_merge(name: str, expression: str, run_id: int) -> str:
     scope = _scope_expression()
-    value = f"COALESCE(CONVERT(NVARCHAR(300),[{column}]),N'{NULL_VALUE}')"
+    value = f"COALESCE(CONVERT(NVARCHAR(300),({expression})),N'{NULL_VALUE}')"
     return f"""
 MERGE dbo.analytics_dimension_stat AS target
 USING (
@@ -139,7 +141,7 @@ USING (
            COALESCE(SUM(CONVERT(DECIMAL(38,2),total_costs)),0) AS total_costs_sum,
            COUNT_BIG(total_costs) AS total_costs_count
     FROM {storage.TABLE_NAME} WHERE source_batch_id={int(run_id)}
-    GROUP BY GROUPING SETS (([{column}]),(hospital_service_area,[{column}]))
+    GROUP BY GROUPING SETS ((({expression})),(({registry.SERVICE_AREA_SQL}),({expression})))
 ) AS source
 ON target.scope_service_area=source.scope_service_area
 AND target.dimension_name=source.dimension_name AND target.dimension_value=source.dimension_value
@@ -171,7 +173,9 @@ def batch_merge_sql(run_id: int) -> str:
     return f"""
 IF EXISTS (
     SELECT 1 FROM dbo.system_state analytics CROSS JOIN dbo.system_state data_version
+    CROSS JOIN dbo.system_state schema_version
     WHERE analytics.state_key=N'analytics_data_version' AND data_version.state_key=N'data_version'
+      AND schema_version.state_key=N'analytics_schema_version' AND schema_version.int_value>=2
       AND analytics.int_value=data_version.int_value
 )
 BEGIN
@@ -183,7 +187,7 @@ USING (
            COALESCE(SUM(CONVERT(DECIMAL(38,2),total_charges)),0) AS total_charges_sum,
            COUNT_BIG(total_charges) AS total_charges_count
     FROM {storage.TABLE_NAME} WHERE source_batch_id={int(run_id)}
-    GROUP BY GROUPING SETS ((),(hospital_service_area))
+    GROUP BY GROUPING SETS ((),(({registry.SERVICE_AREA_SQL})))
 ) AS source ON target.scope_service_area=source.scope_service_area
 WHEN MATCHED THEN UPDATE SET
     discharges=target.discharges+source.discharges,
@@ -203,7 +207,7 @@ USING (
     SELECT {scope} AS scope_service_area,facility_name
     FROM {storage.TABLE_NAME}
     WHERE source_batch_id={int(run_id)} AND facility_name IS NOT NULL
-    GROUP BY GROUPING SETS ((facility_name),(hospital_service_area,facility_name))
+    GROUP BY GROUPING SETS ((facility_name),(({registry.SERVICE_AREA_SQL}),facility_name))
 ) AS source
 ON target.scope_service_area=source.scope_service_area AND target.facility_name=source.facility_name
 WHEN NOT MATCHED THEN INSERT(scope_service_area,facility_name)
@@ -233,4 +237,4 @@ def scope_for(filters: dict | None) -> str | None:
     filters = filters or {}
     if set(filters) - {"service_area"}:
         return None
-    return str(filters.get("service_area") or ALL_SCOPE)
+    return str(registry.normalize_filter_value("service_area", filters.get("service_area")) or ALL_SCOPE)

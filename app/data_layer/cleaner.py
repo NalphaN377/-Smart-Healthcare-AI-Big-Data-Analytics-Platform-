@@ -90,6 +90,22 @@ def normalize_types(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def normalize_cross_year_labels(df: pd.DataFrame) -> pd.DataFrame:
+    """归一化2021—2024年度间已确认的分类标签漂移。"""
+    if "Age Group" in df.columns:
+        df["Age Group"] = df["Age Group"].replace({
+            "0 to 17": "0-17", "18 to 29": "18-29", "30 to 49": "30-49",
+            "50 to 69": "50-69", "70 or Older": "70+", "70 and Older": "70+",
+        })
+    if "Hospital Service Area" in df.columns:
+        df["Hospital Service Area"] = df["Hospital Service Area"].replace({
+            "Capital/Adirond": "Capital/Adirondacks",
+        })
+    if "Facility Name" in df.columns:
+        df["Facility Name"] = df["Facility Name"].str.replace("`", "'", regex=False)
+    return df
+
+
 def handle_missing(df: pd.DataFrame, fill_map: dict = None) -> pd.DataFrame:
     """缺失值处理：字符字段缺失填充空串，数值字段保持 NaN（后续由业务决定）。
 
@@ -115,6 +131,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df = drop_duplicates(df)
     df = clean_money(df)
     df = normalize_types(df)
+    df = normalize_cross_year_labels(df)
     df = handle_missing(df)
     df = clean_birth_weight(df)
     return df

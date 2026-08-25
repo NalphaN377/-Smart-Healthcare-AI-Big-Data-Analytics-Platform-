@@ -63,6 +63,10 @@ def create_app() -> Flask:
     def invalid_value(error):
         return fail(str(error), code=400), 400
 
+    @app.errorhandler(PermissionError)
+    def permission_denied(error):
+        return fail(str(error), code=403), 403
+
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error):
         return fail("请求体不能超过 1 MB", code=413), 413

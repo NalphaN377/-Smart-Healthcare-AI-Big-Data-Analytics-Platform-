@@ -38,3 +38,20 @@ def test_long_time_series_has_inside_and_slider_zoom():
     option = generate_chart_option(data, "line")
     assert [item["type"] for item in option["dataZoom"]] == ["inside", "slider"]
     assert option["series"][0]["smooth"] is True
+
+
+def test_two_dimension_year_trend_creates_separate_series():
+    data = {
+        "dimension": "disease", "dimensions": ["year", "disease"],
+        "metrics": ["count"],
+        "rows": [
+            {"year": 2021, "disease": "A", "count": 10},
+            {"year": 2022, "disease": "A", "count": 12},
+            {"year": 2021, "disease": "B", "count": 8},
+            {"year": 2022, "disease": "B", "count": 9},
+        ],
+    }
+    option = generate_chart_option(data, "line")
+    assert option["xAxis"]["data"] == [2021, 2022]
+    assert [series["name"] for series in option["series"]] == ["A", "B"]
+    assert option["series"][0]["data"] == [10, 12]

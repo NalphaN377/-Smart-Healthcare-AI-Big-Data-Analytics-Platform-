@@ -85,6 +85,33 @@ def test_sse_chat_has_context_delta_and_done(monkeypatch):
     assert json.loads(done_line[6:])["summary"]
 
 
+def test_sse_concept_question_uses_knowledge_rag(monkeypatch):
+    from app.ai_layer import agent as agent_module
+    from app.ai_layer import conversation as conversations
+
+    client = authenticated_client(monkeypatch, "doctor")
+    monkeypatch.setattr(conversations, "resolve", lambda *_args, **_kwargs: {"public_id": "00000000-0000-0000-0000-000000000001"})
+    monkeypatch.setattr(conversations, "history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(conversations, "append_message", lambda *_args, **_kwargs: 1)
+    monkeypatch.setitem(LLM_CONFIG, "api_key", "")
+    monkeypatch.setattr(agent_module, "_agent", agent_module.MedicalAgent(use_llm_intent=False))
+
+    response = client.post(
+        "/api/chat/stream", json={"query": "费用和成本有什么区别？"},
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+    body = response.get_data(as_text=True)
+    context_block = next(block for block in body.split("\n\n") if "event: context" in block)
+    context_line = next(line for line in context_block.splitlines() if line.startswith("data: "))
+    context = json.loads(context_line[6:])
+
+    assert response.status_code == 200
+    assert context["answer_mode"] == "knowledge"
+    assert context["direct_answer"] is None
+    assert context["knowledge_sources"] == ["费用与成本口径"]
+    assert "Total Charges" in body
+
+
 def test_sse_unsupported_question_has_no_chart_or_data_query(monkeypatch):
     from app.ai_layer import agent as agent_module
     from app.ai_layer import conversation as conversations
@@ -223,6 +250,155 @@ def test_patient_cannot_access_patient_profile(monkeypatch):
     assert client.get("/api/data-quality").status_code == 403
 
 
+def test_role_specific_analytics_catalog(monkeypatch):
+    admin = authenticated_client(monkeypatch, "admin")
+    admin_metrics = {item["key"] for item in admin.get("/api/v2/analytics/catalog").get_json()["data"]["metrics"]}
+    doctor = authenticated_client(monkeypatch, "doctor")
+    doctor_metrics = {item["key"] for item in doctor.get("/api/v2/analytics/catalog").get_json()["data"]["metrics"]}
+    patient = authenticated_client(monkeypatch, "patient")
+    patient_dimensions = {item["key"] for item in patient.get("/api/v2/analytics/catalog").get_json()["data"]["dimensions"]}
+    assert "charge_cost_spread_ratio" in admin_metrics
+    assert "charge_cost_spread_ratio" not in doctor_metrics
+    assert patient_dimensions == {"disease", "service_area", "year"}
+
+
+def test_analytics_query_passes_server_role_and_blocks_finance(monkeypatch):
+    patient = authenticated_client(monkeypatch, "patient")
+    response = patient.post(
+        "/api/v2/analytics/query",
+        json={"dimensions": ["year"], "metrics": ["charge_cost_spread_ratio"]},
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+    assert response.status_code == 403
+
+
+def test_topic_endpoint_enforces_admin_only_analysis(monkeypatch):
+    doctor = authenticated_client(monkeypatch, "doctor")
+    response = doctor.post(
+        "/api/v2/analytics/topics/data_quality", json={},
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+    assert response.status_code == 403
+
+
+def test_notifications_are_scoped_to_current_user(monkeypatch):
+    from app.service_layer import notifications as notification_service
+
+    client = authenticated_client(monkeypatch, "doctor")
+    captured = {}
+    monkeypatch.setattr(notification_service, "list_for_user", lambda user_id, limit: captured.update(user_id=user_id, limit=limit) or {
+        "items": [{"id": 7, "report_id": 3, "is_read": False}], "unread_count": 1,
+    })
+    response = client.get("/api/notifications?limit=20")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["unread_count"] == 1
+    assert captured == {"user_id": 1, "limit": 20}
+
+
+def test_notification_read_cannot_cross_accounts(monkeypatch):
+    from app.service_layer import notifications as notification_service
+
+    client = authenticated_client(monkeypatch, "patient")
+    monkeypatch.setattr(notification_service, "mark_read", lambda _user_id, _notification_id: False)
+    response = client.put("/api/notifications/99/read", headers={"X-CSRF-Token": "test-csrf"})
+
+    assert response.status_code == 404
+    assert response.get_json()["message"] == "通知不存在"
+
+
+def test_publish_report_creates_patient_and_doctor_notifications(monkeypatch):
+    from app.service_layer import notifications as notification_service
+
+    class Cursor:
+        rowcount = 1
+
+        def __init__(self):
+            self.commands = []
+
+        def execute(self, sql, params=()):
+            self.commands.append((sql, params))
+
+        def fetchone(self):
+            return ("新报告", "draft")
+
+    class Connection:
+        def __init__(self):
+            self.cursor_value = Cursor()
+            self.committed = False
+
+        def cursor(self):
+            return self.cursor_value
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    connection = Connection()
+    created = {}
+    monkeypatch.setattr(storage, "get_connection", lambda: connection)
+    monkeypatch.setattr(notification_service, "enqueue_report_published", lambda cursor, report_id, title: created.update(cursor=cursor, report_id=report_id, title=title) or 2)
+    monkeypatch.setattr(auth_service, "audit", lambda *_args, **_kwargs: None)
+    client = authenticated_client(monkeypatch, "admin")
+
+    response = client.put("/api/admin/reports/12/publish", headers={"X-CSRF-Token": "test-csrf"})
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["notifications_created"] == 2
+    assert created["report_id"] == 12 and created["title"] == "新报告"
+    assert connection.committed is True
+
+
+def test_withdraw_report_removes_notifications_in_same_transaction(monkeypatch):
+    class Cursor:
+        rowcount = 1
+
+        def __init__(self):
+            self.commands = []
+
+        def execute(self, sql, params=()):
+            self.commands.append((sql, params))
+            self.rowcount = 3 if sql.startswith("DELETE FROM dbo.user_notification") else 1
+
+        def fetchone(self):
+            return ("published",)
+
+    class Connection:
+        def __init__(self):
+            self.cursor_value = Cursor()
+            self.committed = False
+
+        def cursor(self):
+            return self.cursor_value
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    connection = Connection()
+    monkeypatch.setattr(storage, "get_connection", lambda: connection)
+    monkeypatch.setattr(auth_service, "audit", lambda *_args, **_kwargs: None)
+    client = authenticated_client(monkeypatch, "admin")
+
+    response = client.put("/api/admin/reports/12/withdraw", headers={"X-CSRF-Token": "test-csrf"})
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["notifications_removed"] == 3
+    assert any(sql.startswith("DELETE FROM dbo.user_notification") for sql, _params in connection.cursor_value.commands)
+    assert any("status='draft'" in sql for sql, _params in connection.cursor_value.commands)
+    assert connection.committed is True
+
+
 def test_patient_overview_is_projected(monkeypatch):
     client = authenticated_client(monkeypatch, "patient")
     monkeypatch.setattr(aggregation, "overview", lambda *_args, **_kwargs: {
@@ -237,12 +413,45 @@ def test_patient_overview_is_projected(monkeypatch):
 
 
 def test_login_starts_session_and_returns_permissions(client, monkeypatch):
+    from app.auth import captcha
+
+    user = {"id": 7, "username": "doctor", "display_name": "医生", "role": "doctor", "is_active": True,
+            "must_change_password": False, "permissions": permissions_for("doctor")}
+    monkeypatch.setattr(captcha, "verify", lambda _value: (True, ""))
+    monkeypatch.setattr(auth_service, "authenticate", lambda *_args, **_kwargs: (user, "success"))
+    response = client.post("/api/auth/login", json={"username": "doctor", "password": "Password123", "captcha": "ABCDE"})
+    assert response.status_code == 200
+    assert "patient_profile:read" in response.get_json()["data"]["user"]["permissions"]
+
+
+def test_login_captcha_is_required_and_one_time(client, monkeypatch):
+    from app.auth import captcha
+
+    monkeypatch.setattr(captcha.secrets, "choice", lambda _alphabet: "A")
+    response = client.get("/api/auth/captcha")
+    assert response.status_code == 200
+    assert response.get_json()["data"]["image"].startswith("data:image/svg+xml;base64,")
+
+    wrong = client.post("/api/auth/login", json={
+        "username": "doctor", "password": "Password123", "captcha": "BBBBB",
+    })
+    assert wrong.status_code == 400
+    assert "验证码错误" in wrong.get_json()["message"]
+
+    reused = client.post("/api/auth/login", json={
+        "username": "doctor", "password": "Password123", "captcha": "AAAAA",
+    })
+    assert reused.status_code == 400
+    assert "过期" in reused.get_json()["message"]
+
     user = {"id": 7, "username": "doctor", "display_name": "医生", "role": "doctor", "is_active": True,
             "must_change_password": False, "permissions": permissions_for("doctor")}
     monkeypatch.setattr(auth_service, "authenticate", lambda *_args, **_kwargs: (user, "success"))
-    response = client.post("/api/auth/login", json={"username": "doctor", "password": "Password123"})
-    assert response.status_code == 200
-    assert "patient_profile:read" in response.get_json()["data"]["user"]["permissions"]
+    client.get("/api/auth/captcha")
+    valid = client.post("/api/auth/login", json={
+        "username": "doctor", "password": "Password123", "captcha": "AAAAA",
+    })
+    assert valid.status_code == 200
 
 
 def test_patient_or_doctor_can_register(client, monkeypatch):

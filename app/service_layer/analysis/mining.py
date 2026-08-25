@@ -171,7 +171,7 @@ def case_mix_adjusted_hospitals(
         detail_params.append(registry.normalize_filter_value("hospital", requested_filters["hospital"]))
     baseline_where = " AND ".join(baseline_clauses) or "1=1"
     detail_where = " AND ".join(detail_clauses) or "1=1"
-    limit = max(1, min(int(limit), 50))
+    limit = max(1, min(int(limit), 300))
     sql = f"""
 WITH baseline AS (
     SELECT discharge_year,apr_drg_code,apr_severity_of_illness_code,

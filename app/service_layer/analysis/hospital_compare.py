@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+from app.common import cache
 from app.data_layer import storage
 from app.service_layer.analysis import aggregation, mining, registry
 
@@ -91,6 +92,52 @@ def _trend(hospital: str, filters: dict, role: str) -> list[dict]:
     return rows
 
 
+def _case_mix_pair(hospital_a: str, hospital_b: str, filters: dict) -> dict[str, list[dict]]:
+    """一次计算并缓存全院病例组合基准，避免每个医院组合重复扫描全表基线。"""
+    benchmark_filters = {
+        key: value for key, value in filters.items()
+        if key in {"year", "year_from", "year_to", "service_area"}
+    }
+    benchmark, _hit = cache.remember(
+        "hospital_case_mix_benchmark",
+        {"filters": benchmark_filters, "contract_version": 1},
+        lambda: mining.case_mix_adjusted_hospitals(
+            filters=benchmark_filters, role="admin", limit=300,
+        ),
+        ttl=86400,
+    )
+    by_hospital = {
+        registry.normalize_filter_value("hospital", row.get("hospital")): row
+        for row in benchmark.get("rows", []) if row.get("hospital")
+    }
+    return {
+        "a": [by_hospital[hospital_a]] if hospital_a in by_hospital else [],
+        "b": [by_hospital[hospital_b]] if hospital_b in by_hospital else [],
+    }
+
+
+def _hospital_profile(hospital: str, filters: dict, role: str) -> dict:
+    """缓存单院画像，使任意A/B组合复用，而不是为24,531个医院对分别缓存。"""
+    def produce():
+        profile = {
+            "summary": _summary(hospital, filters, role),
+            "disease": _group(hospital, "disease", filters, role),
+            "trend": _trend(hospital, filters, role),
+        }
+        if role != "patient":
+            profile["severity"] = _group(hospital, "severity", filters, role, 6)
+            profile["admission"] = _group(hospital, "admission_type", filters, role, 8)
+        return profile
+
+    profile, _hit = cache.remember(
+        "hospital_operation_profile",
+        {"hospital": hospital, "filters": filters, "role": role, "contract_version": 1},
+        produce,
+        ttl=86400,
+    )
+    return profile
+
+
 def compare_hospitals(
     hospital_a: str, hospital_b: str, *, filters: dict | None = None, role: str = "patient",
 ) -> dict:
@@ -101,40 +148,26 @@ def compare_hospitals(
     requested_filters = dict(filters or {})
     requested_filters.pop("hospital", None)
     jobs = {
-        "summary_a": lambda: _summary(a, requested_filters, role),
-        "summary_b": lambda: _summary(b, requested_filters, role),
-        "disease_a": lambda: _group(a, "disease", requested_filters, role),
-        "disease_b": lambda: _group(b, "disease", requested_filters, role),
-        "trend_a": lambda: _trend(a, requested_filters, role),
-        "trend_b": lambda: _trend(b, requested_filters, role),
+        "profile_a": lambda: _hospital_profile(a, requested_filters, role),
+        "profile_b": lambda: _hospital_profile(b, requested_filters, role),
     }
-    if role != "patient":
-        jobs.update(
-            severity_a=lambda: _group(a, "severity", requested_filters, role, 6),
-            severity_b=lambda: _group(b, "severity", requested_filters, role, 6),
-            admission_a=lambda: _group(a, "admission_type", requested_filters, role, 8),
-            admission_b=lambda: _group(b, "admission_type", requested_filters, role, 8),
-        )
     if role == "admin":
-        case_mix_filters = {key: value for key, value in requested_filters.items() if key in {"year", "year_from", "year_to", "service_area"}}
-        jobs.update(
-            case_mix_a=lambda: mining.case_mix_adjusted_hospitals(filters={**case_mix_filters, "hospital": a}, role=role, limit=1),
-            case_mix_b=lambda: mining.case_mix_adjusted_hospitals(filters={**case_mix_filters, "hospital": b}, role=role, limit=1),
-        )
+        jobs["case_mix"] = lambda: _case_mix_pair(a, b, requested_filters)
     with ThreadPoolExecutor(max_workers=min(len(jobs), 10)) as executor:
         futures = {key: executor.submit(job) for key, job in jobs.items()}
         result = {key: future.result() for key, future in futures.items()}
-    if not result["summary_a"].get("count") or not result["summary_b"].get("count"):
+    profile_a, profile_b = result["profile_a"], result["profile_b"]
+    if not profile_a["summary"].get("count") or not profile_b["summary"].get("count"):
         raise ValueError(f"当前筛选下每家医院至少需要 {MIN_CASES} 条记录")
     return {
-        "hospitals": [{"key": "a", **result["summary_a"]}, {"key": "b", **result["summary_b"]}],
-        "yearly_trend": {"a": result["trend_a"], "b": result["trend_b"]},
+        "hospitals": [{"key": "a", **profile_a["summary"]}, {"key": "b", **profile_b["summary"]}],
+        "yearly_trend": {"a": profile_a["trend"], "b": profile_b["trend"]},
         "mixes": {
-            "disease": {"a": result["disease_a"], "b": result["disease_b"]},
-            **({"severity": {"a": result["severity_a"], "b": result["severity_b"]},
-                "admission": {"a": result["admission_a"], "b": result["admission_b"]}} if role != "patient" else {}),
+            "disease": {"a": profile_a["disease"], "b": profile_b["disease"]},
+            **({"severity": {"a": profile_a["severity"], "b": profile_b["severity"]},
+                "admission": {"a": profile_a["admission"], "b": profile_b["admission"]}} if role != "patient" else {}),
         },
-        "case_mix": ({"a": result["case_mix_a"]["rows"], "b": result["case_mix_b"]["rows"]} if role == "admin" else None),
+        "case_mix": result["case_mix"] if role == "admin" else None,
         "filters": requested_filters,
         "role_scope": role,
         "caveats": [

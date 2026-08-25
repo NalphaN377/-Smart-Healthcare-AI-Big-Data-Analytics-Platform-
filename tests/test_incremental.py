@@ -1,4 +1,8 @@
 import csv
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 from app.common import cache
 from scripts.incremental_ingest_sqlserver import build_incremental_sql, read_and_validate_header
@@ -68,3 +72,25 @@ def test_cache_aside_hits_on_second_call(monkeypatch):
     assert first_hit is False
     assert second_hit is True
     assert calls == [1]
+
+
+def test_redis_first_connection_is_thread_safe(monkeypatch):
+    created = []
+
+    def redis_factory(**_kwargs):
+        fake = FakeRedis()
+        original_ping = fake.ping
+        fake.ping = lambda: (time.sleep(0.03), original_ping())[1]
+        created.append(fake)
+        return fake
+
+    monkeypatch.setitem(cache.FEATURES, "redis_cache", True)
+    monkeypatch.setattr(cache, "_client", None)
+    monkeypatch.setattr(cache, "_connection_attempted", False)
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=redis_factory))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        clients = list(executor.map(lambda _index: cache._redis_client(), range(8)))
+
+    assert len(created) == 1
+    assert all(client is created[0] for client in clients)

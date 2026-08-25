@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from typing import Callable, TypeVar
 
 from config import FEATURES, REDIS_CONFIG
@@ -17,28 +18,33 @@ T = TypeVar("T")
 
 _client = None
 _connection_attempted = False
+_connection_lock = threading.Lock()
 
 
 def _redis_client():
     global _client, _connection_attempted
     if not FEATURES.get("redis_cache"):
         return None
-    if _connection_attempted:
+    if _client is not None:
         return _client
-    _connection_attempted = True
-    try:
-        import redis
-        candidate = redis.Redis(
-            host=REDIS_CONFIG["host"], port=REDIS_CONFIG["port"], db=REDIS_CONFIG["db"],
-            password=REDIS_CONFIG["password"], decode_responses=True,
-            socket_connect_timeout=REDIS_CONFIG["socket_timeout"],
-            socket_timeout=REDIS_CONFIG["socket_timeout"],
-        )
-        candidate.ping()
-        _client = candidate
-    except Exception as exc:  # 缓存不可用时必须降级到数据库
-        logger.warning("Redis 不可用，跳过缓存: %s", exc.__class__.__name__)
-        _client = None
+    # 并发请求和预热任务只允许一个线程完成首次握手，避免其他线程误降级到数据库。
+    with _connection_lock:
+        if _connection_attempted:
+            return _client
+        _connection_attempted = True
+        try:
+            import redis
+            candidate = redis.Redis(
+                host=REDIS_CONFIG["host"], port=REDIS_CONFIG["port"], db=REDIS_CONFIG["db"],
+                password=REDIS_CONFIG["password"], decode_responses=True,
+                socket_connect_timeout=REDIS_CONFIG["socket_timeout"],
+                socket_timeout=REDIS_CONFIG["socket_timeout"],
+            )
+            candidate.ping()
+            _client = candidate
+        except Exception as exc:  # 缓存不可用时必须降级到数据库
+            logger.warning("Redis 不可用，跳过缓存: %s", exc.__class__.__name__)
+            _client = None
     return _client
 
 

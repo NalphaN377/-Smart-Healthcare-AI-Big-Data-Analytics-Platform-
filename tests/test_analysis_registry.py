@@ -71,3 +71,22 @@ def test_growth_ranking_compares_first_and_last_available_year(monkeypatch):
     assert result["rows"][0]["growth_pct"] == 50.0
     assert result["rows"][0]["absolute_growth"] == 500.0
     assert result["source_metric"] == "sum_total_costs"
+    assert [row["dimension_value"] for row in result["ranking_views"]["decline"]] == ["B", "A"]
+    assert result["ranking_views"]["absolute"][0]["dimension_value"] == "A"
+
+
+def test_growth_ranking_returns_declines_and_largest_absolute_changes(monkeypatch):
+    monkeypatch.setattr(aggregation, "_run_query", lambda *_args, **_kwargs: [
+        {"year": 2021, "dimension_value": "增长", "count": 100, "metric_value": 100},
+        {"year": 2024, "dimension_value": "增长", "count": 130, "metric_value": 130},
+        {"year": 2021, "dimension_value": "下降", "count": 200, "metric_value": 200},
+        {"year": 2024, "dimension_value": "下降", "count": 140, "metric_value": 140},
+        {"year": 2021, "dimension_value": "大幅变化", "count": 1000, "metric_value": 1000},
+        {"year": 2024, "dimension_value": "大幅变化", "count": 1200, "metric_value": 1200},
+    ])
+
+    result = mining.growth_ranking("disease", "count", role="doctor", limit=2)
+
+    assert result["ranking_views"]["growth"][0]["dimension_value"] == "增长"
+    assert result["ranking_views"]["decline"][0]["dimension_value"] == "下降"
+    assert result["ranking_views"]["absolute"][0]["dimension_value"] == "大幅变化"

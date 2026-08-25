@@ -109,11 +109,11 @@ def growth_ranking(
                 for point in points
             ],
         })
-    ranked.sort(
-        key=lambda item: (item["growth_pct"] is not None, item["growth_pct"] or float("-inf")),
-        reverse=True,
-    )
     limit = max(1, min(int(limit), 100))
+    comparable = [item for item in ranked if item["growth_pct"] is not None]
+    growth_rows = sorted(comparable, key=lambda item: item["growth_pct"], reverse=True)[:limit]
+    decline_rows = sorted(comparable, key=lambda item: item["growth_pct"])[:limit]
+    absolute_rows = sorted(ranked, key=lambda item: abs(item["absolute_growth"]), reverse=True)[:limit]
     return {
         "analysis_type": "cross_year_growth_ranking",
         "dimension": dimension,
@@ -123,7 +123,12 @@ def growth_ranking(
         "source_metric": metric,
         "source_metric_label": metric_spec.label,
         "filters": requested_filters,
-        "rows": ranked[:limit],
+        "rows": growth_rows,
+        "ranking_views": {
+            "growth": growth_rows,
+            "decline": decline_rows,
+            "absolute": absolute_rows,
+        },
         "suppression_threshold": minimum,
         "caveats": [
             "增长率按该分组最早可用年度与最晚可用年度计算",

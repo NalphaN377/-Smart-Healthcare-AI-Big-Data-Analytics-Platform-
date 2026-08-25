@@ -69,6 +69,26 @@ export function aggregate(dimension, metrics, limit = 20, filters = {}) {
   return request(`/aggregate${queryString({ dimension, metrics, limit, ...filters })}`)
 }
 
+export function analyticsQuery(payload = {}) {
+  return request('/v2/analytics/query', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function analyticsTopic(topic, payload = {}) {
+  return request(`/v2/analytics/topics/${encodeURIComponent(topic)}`, {
+    method: 'POST', body: JSON.stringify(payload),
+  })
+}
+
+export function listHospitals(search = '', serviceArea = '') {
+  return request(`/v2/analytics/hospitals${queryString({ search, service_area: serviceArea, limit: 300 })}`)
+}
+
+export function compareHospitals(hospitalA, hospitalB, filters = {}) {
+  return request('/v2/analytics/hospital-compare', {
+    method: 'POST', body: JSON.stringify({ hospital_a: hospitalA, hospital_b: hospitalB, filters }),
+  })
+}
+
 export function chat(query) {
   return request('/chat', { method: 'POST', body: JSON.stringify({ query }) })
 }

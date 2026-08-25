@@ -412,6 +412,23 @@ def test_patient_overview_is_projected(monkeypatch):
     assert payload["payments"] == []
 
 
+def test_patient_can_use_hospital_compare(monkeypatch):
+    from app.service_layer.analysis import hospital_compare
+
+    client = authenticated_client(monkeypatch, "patient")
+    monkeypatch.setattr(hospital_compare, "compare_hospitals", lambda a, b, **kwargs: {
+        "hospitals": [{"hospital": a}, {"hospital": b}], "role_scope": kwargs["role"],
+    })
+    response = client.post(
+        "/api/v2/analytics/hospital-compare",
+        json={"hospital_a": "医院 A", "hospital_b": "医院 B", "filters": {}},
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["role_scope"] == "patient"
+
+
 def test_login_starts_session_and_returns_permissions(client, monkeypatch):
     from app.auth import captcha
 

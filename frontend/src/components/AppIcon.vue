@@ -25,6 +25,9 @@ defineProps({
       <rect x="3" y="14" width="7" height="7" rx="2" />
       <rect x="14" y="14" width="7" height="7" rx="2" />
     </template>
+    <template v-else-if="name === 'chart'">
+      <path d="M4 19V9M10 19V5M16 19v-7M22 19H2" />
+    </template>
     <template v-else-if="name === 'sparkle'">
       <path d="m12 3-1.2 3.3a6 6 0 0 1-3.5 3.5L4 11l3.3 1.2a6 6 0 0 1 3.5 3.5L12 19l1.2-3.3a6 6 0 0 1 3.5-3.5L20 11l-3.3-1.2a6 6 0 0 1-3.5-3.5L12 3Z" />
       <path d="m19 3 .35.95a2 2 0 0 0 1.2 1.2l.95.35-.95.35a2 2 0 0 0-1.2 1.2L19 8l-.35-.95a2 2 0 0 0-1.2-1.2l-.95-.35.95-.35a2 2 0 0 0 1.2-1.2L19 3Z" />

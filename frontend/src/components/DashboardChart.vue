@@ -1,11 +1,11 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, PieChart } from 'echarts/charts'
-import { AriaComponent, DataZoomComponent, DatasetComponent, GraphicComponent, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
+import { BarChart, HeatmapChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
+import { AriaComponent, DataZoomComponent, DatasetComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
 
-echarts.use([BarChart, LineChart, PieChart, AriaComponent, DataZoomComponent, DatasetComponent, GraphicComponent, GridComponent, LegendComponent, ToolboxComponent, TooltipComponent, SVGRenderer])
+echarts.use([BarChart, HeatmapChart, LineChart, PieChart, ScatterChart, AriaComponent, DataZoomComponent, DatasetComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, VisualMapComponent, SVGRenderer])
 
 const emit = defineEmits(['select'])
 

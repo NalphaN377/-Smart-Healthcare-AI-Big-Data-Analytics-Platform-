@@ -661,12 +661,53 @@ def analytics_topic(topic):
     if not isinstance(filters, dict):
         raise ValueError("filters 必须是对象")
     role = current_user()["role"]
-    extra = {"topic": topic, "filters": filters, "limit": body.get("limit", 100)}
+    extra = {"topic": topic, "filters": filters, "limit": body.get("limit", 100), "contract_version": 2}
     data, cache_meta = _cached(
         f"analytics_topic:{topic}",
         lambda: mining.topic_analysis(
             topic, role=role, filters=filters, limit=max(1, min(int(body.get("limit", 100)), 100)),
             dimension=body.get("dimension"), metrics=body.get("metrics"),
+        ),
+        extra=extra,
+    )
+    return success(data, meta=cache_meta)
+
+
+@api.get("/v2/analytics/hospitals")
+@timing()
+@login_required
+def analytics_hospitals():
+    from app.service_layer.analysis import hospital_compare
+
+    search = (request.args.get("search") or "").strip()[:100]
+    service_area = (request.args.get("service_area") or "").strip()[:100]
+    limit = request.args.get("limit", 100, type=int)
+    if limit is None or not 1 <= limit <= 300:
+        raise ValueError("limit 必须在 1 到 300 之间")
+    data, cache_meta = _cached(
+        "analytics_hospitals",
+        lambda: hospital_compare.list_hospitals(search=search, service_area=service_area, limit=limit),
+        extra={"search": search, "service_area": service_area},
+    )
+    return success(data, meta=cache_meta)
+
+
+@api.post("/v2/analytics/hospital-compare")
+@timing()
+@login_required
+def analytics_hospital_compare():
+    from app.service_layer.analysis import hospital_compare
+
+    body = request.get_json(silent=True) or {}
+    filters = body.get("filters") or {}
+    if not isinstance(filters, dict):
+        raise ValueError("filters 必须是对象")
+    hospital_a, hospital_b = body.get("hospital_a"), body.get("hospital_b")
+    extra = {"hospital_a": hospital_a, "hospital_b": hospital_b, "filters": filters, "contract_version": 1}
+    data, cache_meta = _cached(
+        "analytics_hospital_compare",
+        lambda: hospital_compare.compare_hospitals(
+            hospital_a, hospital_b, filters=filters, role=current_user()["role"],
         ),
         extra=extra,
     )

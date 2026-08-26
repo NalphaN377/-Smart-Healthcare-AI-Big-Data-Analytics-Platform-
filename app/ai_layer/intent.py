@@ -11,6 +11,7 @@ import re
 from typing import Iterable, List
 
 from config import LLM_CONFIG
+from app.common import disease_dictionary
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ DIMENSION_KEYWORDS = {
     "hospital": ["医院", "医疗机构", "院区", "机构"],
     "county": ["县", "郡", "county", "所在地区"],
     "service_area": ["服务区域", "服务区", "医疗服务区域", "片区"],
-    "year": ["年份", "年度", "逐年", "历年", "每年", "时间趋势", "年变化"],
+    "year": ["年份", "年度", "逐年", "历年", "每年", "四年", "近四年", "多年", "时间趋势", "年变化"],
     "payment": ["支付方式", "支付类型", "医保", "保险", "付费方式", "付款方式"],
     "gender": ["性别", "男女", "男性女性", "男女性"],
     "admission_type": ["入院类型", "入院方式", "急诊入院", "择期入院"],
@@ -45,7 +46,7 @@ DIMENSION_KEYWORDS = {
 }
 
 METRIC_KEYWORDS = {
-    "avg_length_of_stay": ["住院时长", "住院日", "住院天数", "住多久", "住院时间", "平均住院", "住得最久", "住得最长", "住院更久", "住院较久", "住得更久"],
+    "avg_length_of_stay": ["住院时长", "住院日", "住院天数", "住多久", "住院时间", "平均住院日", "平均住院时间", "住得最久", "住得最长", "住院更久", "住院较久", "住得更久"],
     "sum_total_charges": ["总费用", "费用总额", "总花费", "费用合计", "累计费用", "总收费"],
     "avg_total_charges": ["平均费用", "次均费用", "人均费用", "费用", "花费", "金额", "收费", "最贵", "费用最高"],
     "avg_total_costs": ["平均成本", "次均成本", "成本", "成本最高"],
@@ -72,10 +73,10 @@ METRIC_KEYWORDS = {
 TOPIC_KEYWORDS = {
     "growth_ranking": ["增长最快", "增长最多", "增速最快", "增长率最高", "增长幅度最大"],
     "disease_trend": ["疾病趋势", "病种趋势", "疾病负担"],
-    "complexity": ["病例复杂度", "病例组合", "严重程度资源"],
+    "complexity": ["病例复杂度", "病例组合", "严重程度资源", "严重程度与资源消耗", "病情严重程度与资源消耗"],
     "hospital_benchmark": ["病例组合校正", "医院成本指数", "医院效率指数", "校正后医院"],
     "pathway": ["诊疗路径", "疾病手术路径", "手术路径"],
-    "emergency": ["急诊路径", "急诊和入院", "急诊分析"],
+    "emergency": ["急诊路径", "急诊入院路径", "急诊和入院", "急诊分析"],
     "outcome": ["出院结局", "结局分析", "风险分层"],
     "payment": ["支付结构", "支付方式分析", "支付趋势"],
     "demographic": ["人口结构", "健康差异", "人群差异"],
@@ -136,6 +137,8 @@ def _matched_keys(query: str, mapping: dict[str, list[str]]) -> list[tuple[str, 
 
 
 def detect_dimension(query: str) -> str | None:
+    if disease_dictionary.resolve(query):
+        return "disease"
     matches = _matched_keys(query, DIMENSION_KEYWORDS)
     if matches:
         return matches[0][0]
@@ -152,6 +155,17 @@ def detect_metrics(query: str) -> List[str]:
         matched.remove("avg_total_charges")
     if "sum_total_costs" in matched and "avg_total_costs" in matched and not _contains_any(query, ("平均", "次均", "人均")):
         matched.remove("avg_total_costs")
+    # 复合财务指标已经包含收费与成本口径，不再重复附带泛化的均值或差额指标。
+    # 否则“四年收费成本差额率”会被扩展成五个指标，削弱回答焦点。
+    financial_components = {
+        "charge_cost_spread_ratio": {"charge_cost_spread", "avg_total_charges", "avg_total_costs"},
+        "cost_to_charge_ratio": {"avg_total_charges", "avg_total_costs"},
+        "charge_to_cost_multiple": {"avg_total_charges", "avg_total_costs"},
+        "charge_cost_spread": {"avg_total_charges", "avg_total_costs"},
+    }
+    for composite, components in financial_components.items():
+        if composite in matched:
+            matched = [metric for metric in matched if metric not in components]
     return matched
 
 
@@ -200,11 +214,13 @@ def _year_filters(query: str) -> dict:
 
 
 def _disease_filters(query: str) -> dict:
-    """提取用户明示指定的英文疾病名称。
+    """提取中英文疾病名称，并规范化为数据库中的 CCSR 疾病描述。
 
     例如“Septicemia类疾病”必须变成疾病筛选，不能对全部疾病做排名。
-    中文疾病名容易与问句助词混淆，交由白名单校验后的LLM结果处理。
     """
+    matched = disease_dictionary.resolve(query)
+    if matched:
+        return {"disease": matched["english"]}
     match = re.search(
         r"([A-Za-z][A-Za-z0-9 _/&,'().\-]{1,100}?)\s*(?:类疾病|疾病|患者|病例)",
         query,
@@ -277,20 +293,23 @@ def detect_intent(query: str) -> dict:
                 )
             return _base_intent(
                 query, "ready", 0.94, topic=topic, dimension=dimension,
-                metrics=metrics, chart_type="bar", filters=_year_filters(query),
+                metrics=metrics, chart_type="bar", filters={**_year_filters(query), **_disease_filters(query)},
                 sort_by="growth_pct", sort_order="desc", message="",
             )
         return _base_intent(
             query, "ready", 0.92, topic=topic, chart_type="line" if topic != "hospital_benchmark" else "bar",
-            filters=_year_filters(query), message="",
+            filters={**_year_filters(query), **_disease_filters(query)}, message="",
         )
 
     dimension = detect_dimension(query)
     metrics = detect_metrics(query)
+    named_disease = _disease_filters(query)
+    if named_disease and not metrics and _contains_any(query, ("趋势", "走势", "变化", "逐年", "历年")):
+        dimension, metrics = "year", ["count"]
     primary_rate = next((metric for metric in metrics if metric in RATE_METRICS), None)
     if primary_rate and "count" not in metrics:
         metrics.append("count")
-    has_domain = _contains_any(query, DATA_TERMS)
+    has_domain = _contains_any(query, DATA_TERMS) or bool(disease_dictionary.resolve(query))
     has_analysis = _contains_any(query, ANALYSIS_TERMS)
     if not has_domain or (not dimension and not metrics and not has_analysis):
         return _base_intent(query, "unsupported", 0.9, message=_message("unsupported"))
@@ -318,8 +337,11 @@ def detect_intent(query: str) -> dict:
         return _base_intent(query, "clarification", 0.35, message=_message("clarification"))
 
     limit = _top_limit(query)
-    filters = {**_year_filters(query), **_disease_filters(query)}
-    sort_by = primary_rate or (metrics[0] if _contains_any(query, ("最高", "最低", "最多", "最少", "最长", "最短", "排名", "排行", "排序", "排一下", "从高到低", "从低到高", "top", "前")) else None)
+    filters = {**_year_filters(query), **named_disease}
+    ranking_requested = _contains_any(query, ("最高", "最低", "最多", "最少", "最长", "最短", "排名", "排行", "排序", "排一下", "从高到低", "从低到高", "top", "前"))
+    # 年度趋势必须保持时间顺序；其他比率对比默认按指标排序，便于横向比较。
+    chronological = dimension == "year" and _contains_any(query, ("趋势", "走势", "逐年", "历年", "每年", "变化")) and not ranking_requested
+    sort_by = None if chronological else primary_rate or (metrics[0] if ranking_requested else None)
     sort_order = "asc" if _contains_any(query, ("最低", "最少", "最短", "从低到高", "升序")) else "desc"
     chart_type = detect_chart_type(query, metrics)
     if chart_type == "line" and dimension != "year" and "折线图" not in query:

@@ -6,6 +6,7 @@
 """
 import logging
 
+from app.common.disease_dictionary import chinese_label
 from app.service_layer.analysis import registry
 
 logger = logging.getLogger(__name__)
@@ -63,11 +64,16 @@ def _rows(data: dict):
     return rows
 
 
+def _category(data: dict, row: dict) -> str:
+    value = row.get("dimension_value") or row.get("payment") or row.get("year")
+    return chinese_label(value) if data.get("dimension") == "disease" else str(value)
+
+
 def build_bar_option(data: dict, value_field: str = None) -> dict:
     """柱状图配置。"""
     rows = _rows(data)
     value_field = value_field or _pick_value_field(data)
-    categories = [str(r.get("dimension_value") or r.get("payment") or r.get("year")) for r in rows]
+    categories = [_category(data, row) for row in rows]
     values = [r.get(value_field) for r in rows]
     dim_label = DIMENSION_LABELS.get(data.get("dimension", ""), "维度")
     return {
@@ -97,7 +103,7 @@ def build_pie_option(data: dict, value_field: str = None) -> dict:
     rows = _rows(data)
     value_field = value_field or _pick_value_field(data)
     pie_data = [
-        {"name": str(r.get("dimension_value") or r.get("payment")), "value": r.get(value_field)}
+        {"name": _category(data, r), "value": r.get(value_field)}
         for r in rows
     ]
     dim_label = DIMENSION_LABELS.get(data.get("dimension", ""), "维度")
@@ -123,10 +129,14 @@ def build_line_option(data: dict, value_field: str = None) -> dict:
         years = sorted({int(row["year"]) for row in rows if row.get("year") is not None})
         totals = {}
         for row in rows:
-            key = str(row.get(series_dimension) or "(未标注)")
+            raw_key = str(row.get(series_dimension) or "(未标注)")
+            key = chinese_label(raw_key) if series_dimension == "disease" else raw_key
             totals[key] = totals.get(key, 0) + float(row.get("count") or 0)
         selected = [key for key, _ in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:8]]
-        lookup = {(str(row.get(series_dimension) or "(未标注)"), int(row["year"])): row.get(value_field) for row in rows if row.get("year") is not None}
+        lookup = {
+            ((chinese_label(str(row.get(series_dimension) or "(未标注)")) if series_dimension == "disease" else str(row.get(series_dimension) or "(未标注)")), int(row["year"])): row.get(value_field)
+            for row in rows if row.get("year") is not None
+        }
         return {
             "title": {"text": f"{DIMENSION_LABELS.get(series_dimension, series_dimension)} - {METRIC_LABELS.get(value_field, value_field)} 四年趋势"},
             "aria": {"enabled": True}, "toolbox": _toolbox(), "tooltip": {"trigger": "axis"},
@@ -135,7 +145,7 @@ def build_line_option(data: dict, value_field: str = None) -> dict:
             "xAxis": {"type": "category", "data": years, "boundaryGap": False}, "yAxis": {"type": "value"},
             "series": [{"name": key, "type": "line", "data": [lookup.get((key, year)) for year in years], "smooth": True, "connectNulls": False} for key in selected],
         }
-    categories = [str(r.get("dimension_value") or r.get("year")) for r in rows]
+    categories = [_category(data, row) for row in rows]
     values = [r.get(value_field) for r in rows]
     dim_label = DIMENSION_LABELS.get(data.get("dimension", ""), "维度")
     return {

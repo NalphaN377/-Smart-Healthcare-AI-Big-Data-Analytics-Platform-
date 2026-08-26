@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 from config import LLM_CONFIG
 from app.ai_layer.knowledge import compact_context
+from app.common.disease_dictionary import chinese_label
 from app.service_layer.analysis import registry
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,8 @@ def template_summary(data: dict) -> str:
         return f"未查询到「{dimension}」下的有效数据，请调整筛选条件后重试。"
     top = rows[0]
     label = top.get("dimension_value") or top.get("payment") or top.get("year") or "未标注"
+    if data.get("dimension") == "disease":
+        label = chinese_label(label)
     metrics = data.get("metrics") or []
     primary = data.get("sort_by") or (metrics[0] if metrics else "count")
     metric_labels = {key: spec.label for key, spec in registry.METRICS.items()}
@@ -149,6 +152,36 @@ def template_summary(data: dict) -> str:
         "absolute_growth": "绝对增长量",
         "records": "记录数",
     })
+    if data.get("dimension") == "year" and len(rows) >= 2 and primary in rows[0]:
+        ordered = sorted(rows, key=lambda item: int(item.get("dimension_value", item.get("year", 0))))
+        first, last = ordered[0], ordered[-1]
+        first_year = first.get("dimension_value", first.get("year"))
+        last_year = last.get("dimension_value", last.get("year"))
+        first_value, last_value = float(first[primary]), float(last[primary])
+        delta = last_value - first_value
+        direction = "上升" if delta > 0 else "下降" if delta < 0 else "保持不变"
+        metric = registry.METRICS.get(primary)
+        if metric and metric.unit == "%":
+            change = f"{abs(delta):.2f} 个百分点"
+            first_text, last_text = f"{first_value:.2f}%", f"{last_value:.2f}%"
+        elif metric and metric.unit in {"USD", "USD/天"}:
+            suffix = "/天" if metric.unit == "USD/天" else ""
+            change = f"US${abs(delta):,.0f}{suffix}"
+            first_text, last_text = f"US${first_value:,.0f}{suffix}", f"US${last_value:,.0f}{suffix}"
+        elif primary == "count":
+            change = f"{abs(delta):,.0f} 条记录"
+            first_text, last_text = f"{first_value:,.0f} 条记录", f"{last_value:,.0f} 条记录"
+        else:
+            change = f"{abs(delta):,.2f}"
+            first_text, last_text = f"{first_value:,.2f}", f"{last_value:,.2f}"
+        text = (
+            f"按年度统计，{metric_labels.get(primary, primary)}在 {first_year} 年为 {first_text}，"
+            f"{last_year} 年为 {last_text}，累计{direction} {change}。"
+        )
+        meta = next((item for item in data.get("metric_meta", []) if item.get("key") == primary), None)
+        if meta and meta.get("disclaimer"):
+            text += f" 口径提示：{meta['disclaimer']}。"
+        return text
     if (data.get("filters") or {}).get("disease") and len(rows) == 1:
         if primary == "avg_length_of_stay" and top.get(primary) is not None:
             return (

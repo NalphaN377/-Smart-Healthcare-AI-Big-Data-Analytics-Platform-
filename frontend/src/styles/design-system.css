@@ -1,0 +1,466 @@
+/*
+ * Smart Healthcare visual foundation
+ * Neutral, spacious surfaces with a clinical evergreen accent.
+ */
+html:root {
+  --ink: #172b2b !important;
+  --muted: #667675 !important;
+  --teal: #087f72 !important;
+  --teal-dark: #075e57 !important;
+  --surface: #ffffff !important;
+  --canvas: #f5f7f6 !important;
+  --line: #dfe6e4 !important;
+  --shadow: 0 1px 2px rgba(15, 38, 36, .04), 0 10px 30px rgba(15, 38, 36, .045) !important;
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+[role="button"] {
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease,
+    box-shadow 180ms ease, opacity 180ms ease, transform 180ms ease !important;
+}
+
+button:active:not(:disabled),
+[role="button"]:active {
+  transform: scale(.98);
+}
+
+:focus-visible {
+  outline: 3px solid rgba(8, 127, 114, .2) !important;
+  outline-offset: 2px;
+}
+
+::selection {
+  color: #fff;
+  background: #087f72;
+}
+
+/* Main application shell */
+body .app-shell {
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+body .sidebar {
+  width: 248px;
+  padding: 0 16px 20px;
+  background: #103c38;
+  border-right-color: rgba(255, 255, 255, .08);
+}
+
+body .workspace {
+  margin-left: 248px;
+}
+
+body .brand {
+  height: 80px;
+  gap: 12px;
+  padding-inline: 10px;
+}
+
+body .brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+body .brand-mark span {
+  left: 10px;
+  top: 17px;
+  width: 18px;
+}
+
+body .brand strong { font-size: 18px; letter-spacing: .04em; }
+body .brand small { margin-top: 4px; font-size: 9px; letter-spacing: .16em; }
+body .side-label { margin: 22px 12px 8px; font-size: 11px; letter-spacing: .08em; }
+
+body .nav-list button {
+  min-height: 44px;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  font-size: 14px;
+}
+
+body .nav-list button.active {
+  background: #1e5751;
+  box-shadow: inset 3px 0 #70d0c3;
+}
+
+body .nav-list button em { font-size: 10px; }
+body .data-status { padding: 15px; border-radius: 12px; }
+body .status-row strong { font-size: 12px; }
+body .data-status p,
+body .data-status small { font-size: 11px; line-height: 1.55; }
+
+body .topbar {
+  height: 72px;
+  padding: 0 34px;
+  background: rgba(255, 255, 255, .9);
+  border-bottom-color: rgba(210, 221, 218, .8);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+
+body .global-search {
+  width: min(430px, 42vw);
+  min-height: 40px;
+  padding: 0 13px;
+  color: #71817f;
+  background: #f5f7f6;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+
+body .global-search:focus-within {
+  background: #fff;
+  border-color: #9accc5;
+  box-shadow: 0 0 0 4px rgba(8, 127, 114, .08);
+}
+
+body .global-search input { font-size: 13px; }
+body .global-search kbd,
+body .demo-pill { font-size: 11px; }
+body .profile strong { font-size: 12px; }
+body .profile small,
+body .logout-button { font-size: 11px; }
+body .icon-button { min-width: 40px; min-height: 40px; }
+
+body .content {
+  width: min(1600px, 100%);
+  padding: 38px 38px 56px;
+}
+
+body .page-heading {
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+body .page-heading .eyebrow {
+  margin-bottom: 8px;
+  color: #087f72;
+  font-size: 10px;
+  letter-spacing: .17em;
+}
+
+body .page-heading h1 {
+  font-size: clamp(28px, 2.25vw, 36px);
+  font-weight: 680;
+  letter-spacing: -.035em;
+}
+
+body .page-heading > div > span {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+body .filters { flex-wrap: wrap; justify-content: flex-end; }
+body .filters label,
+body .outline-button,
+body .primary-button {
+  min-height: 40px;
+  border-radius: 10px;
+}
+body .filters select,
+body .outline-button,
+body .primary-button { font-size: 13px; }
+
+body .outline-button:hover {
+  color: #075e57;
+  background: #f1f8f6;
+  border-color: #90c5bd;
+}
+
+body .primary-button,
+body .compare-trigger.active,
+body .comparison-tabs button.active,
+body .ranking-tabs button.active {
+  background: #087f72;
+  border-color: #087f72;
+  box-shadow: none;
+}
+
+body .primary-button:hover { background: #076b61; }
+
+/* Cards and information hierarchy */
+body .metric-grid { gap: 16px; }
+body .metric-card,
+body .panel,
+body .report-card {
+  border-color: #dfe6e4;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+body .metric-card {
+  min-height: 132px;
+  padding: 22px 20px 20px 78px;
+}
+
+body .metric-icon {
+  left: 20px;
+  top: 22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+}
+
+body .metric-icon.violet,
+body .report-cover.violet { color: #9a5c49; background: #f8ede9; }
+body .metric-top { font-size: 13px; }
+body .metric-value { margin-top: 12px; font-size: 27px; letter-spacing: -.025em; }
+body .metric-value small { font-size: 12px; }
+body .metric-foot { margin-top: 10px; font-size: 11px; line-height: 1.45; }
+
+body .panel { padding: 23px 24px; }
+body .panel-head { gap: 16px; margin-bottom: 14px; }
+body .panel-head h2 { font-size: 16px; line-height: 1.35; }
+body .panel-head p { margin-top: 5px; font-size: 12px; line-height: 1.5; }
+body .text-button { min-height: 34px; font-size: 12px; }
+body .ai-badge,
+body .analysis-badge,
+body .model-badge { font-size: 11px; }
+
+body .dashboard-grid,
+body .secondary-row,
+body .decision-row { gap: 16px; }
+
+body .insight-item { gap: 13px; padding-block: 16px; }
+body .insight-item em { font-size: 10px; }
+body .insight-item h3 { font-size: 13px; line-height: 1.45; }
+body .insight-item p { font-size: 12px; line-height: 1.6; }
+body .insight-item button { min-height: 32px; font-size: 11px; }
+
+body th { font-size: 11px; letter-spacing: .02em; }
+body td { font-size: 12px; line-height: 1.5; }
+body th,
+body td { padding: 15px 14px; }
+body .table-wrap { overflow: auto; }
+
+/* Dense secondary modules: keep labels readable without inflating charts. */
+body :is(.section-title p, .quality-score-card p, .pipeline-head p,
+  .patient-banner p, .report-body p, .cost-result-card > p,
+  .analytics-empty, .comparison-head p, .chart-modal-card > header p) {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+body :is(.quality-row, .quality-row strong, .mini-stat span, .pipeline-step strong,
+  .gender-legend span, .gender-legend strong, .segment-grid strong,
+  .activity-list strong, .cost-form-section h3, .cost-field-grid input,
+  .cost-field-grid select, .comparison-controls select, .hospital-section-head h3) {
+  font-size: 12px;
+}
+
+body :is(.score-ring small, .quality-score-card .tag, .mini-stat small,
+  .status-tag, .pipeline-step small, .patient-banner > div:first-child > span,
+  .banner-stat span, .segment-grid p, .segment-grid small, .report-cover .report-type,
+  .report-body > small, .activity-list p, .result-kicker, .cost-band small,
+  .model-metrics span, .cost-safety-note p, .comparison-controls label,
+  .comparison-metrics article > span, .comparison-metrics small,
+  .comparison-metrics b, .comparison-metrics p, .hospital-section-head p,
+  .hospital-section-head > span, .hospital-mix-row > strong, .hospital-mix-row span,
+  .case-mix-grid b, .case-mix-grid small, .case-mix-grid p, .hospital-caveat,
+  .quality-matrix td:first-child small, .quality-matrix td:nth-last-child(2) small,
+  .domain-tag, .matrix-caveat, .patient-filter-grid label, .report-id) {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+body :is(.report-tabs button, .filter-context, .filter-context button,
+  .comparison-tabs button, .ranking-tabs button, .ai-action, .compare-run,
+  .matrix-controls select, .patient-filter-grid select, .hospital-compare-status,
+  .api-error, .cost-error, .insights-warning, .analytics-caveat) {
+  font-size: 12px;
+}
+
+body .report-tabs button,
+body .comparison-tabs button,
+body .ranking-tabs button,
+body .ai-action,
+body .compare-run { min-height: 36px; }
+
+body .cost-field-grid label { font-size: 12px; }
+body .cost-field-grid input,
+body .cost-field-grid select,
+body .patient-filter-grid select,
+body .matrix-controls select { min-height: 42px; border-radius: 10px; }
+
+body .cost-result-card {
+  background: #0d625b;
+  border-radius: 17px;
+  box-shadow: 0 14px 35px rgba(13, 98, 91, .14);
+}
+
+body .report-card:hover,
+body .chart-click-card:hover {
+  border-color: #b9d2ce;
+  box-shadow: 0 14px 35px rgba(15, 38, 36, .08);
+  transform: translateY(-2px);
+}
+
+body .chart-modal-backdrop { background: rgba(15, 35, 34, .52); }
+body .chart-modal-card { border-radius: 20px; }
+
+/* Authentication and standalone pages */
+body :is(.login-page, .register-page, .notification-page, .admin, .system, main.page) {
+  color: var(--ink) !important;
+  background: var(--canvas) !important;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Microsoft YaHei", sans-serif !important;
+}
+
+body main.page.embedded {
+  min-height: 0 !important;
+  padding: 0 !important;
+  color: inherit !important;
+  background: transparent !important;
+}
+
+body .login-brand {
+  color: #fff;
+  background: #103c38 !important;
+}
+
+body .login-brand::after {
+  width: 360px;
+  height: 360px;
+  right: -130px;
+  bottom: -150px;
+  border-color: rgba(255, 255, 255, .12);
+}
+
+body .login-brand h1 { font-size: clamp(38px, 4vw, 58px) !important; letter-spacing: -.045em; }
+body .login-brand h1 span { color: #8bd8cc !important; }
+body .login-brand small,
+body .login-brand p { font-size: 13px !important; }
+
+body .login-panel form,
+body .register-page .card,
+body main.page > .card {
+  border-color: #dfe6e4 !important;
+  border-radius: 20px !important;
+  box-shadow: 0 18px 60px rgba(15, 38, 36, .07) !important;
+}
+
+body :is(.login-page, .register-page, main.page) input,
+body .register-page select {
+  min-height: 46px;
+  border-radius: 10px !important;
+  font-size: 14px !important;
+}
+
+body :is(.login-page, .register-page, main.page) label { font-size: 13px !important; }
+body .login-page .submit,
+body .register-page .submit { min-height: 46px; border-radius: 11px !important; font-size: 14px !important; }
+
+body .notification-page,
+body .admin,
+body .system { padding: 44px clamp(20px, 6vw, 96px) 64px; }
+body :is(.notification-page, .admin, .system) h1 { font-size: 32px !important; letter-spacing: -.03em; }
+body :is(.notification-page, .admin, .system) header p { font-size: 14px !important; }
+body .notification-item { min-height: 86px; padding: 20px 22px; }
+body .notification-copy strong { font-size: 15px !important; }
+body .notification-copy span { font-size: 13px !important; }
+body .notification-copy small { font-size: 11px !important; }
+
+body .admin .card,
+body .system .card,
+body .notification-list,
+body .notification-page .empty {
+  border-color: #dfe6e4;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+body .admin button,
+body .system button,
+body .notification-page button { min-height: 38px; font-size: 12px !important; }
+body .admin th,
+body .admin td { font-size: 12px !important; }
+
+@media (max-width: 1180px) {
+  body .sidebar { width: 232px; }
+  body .workspace { margin-left: 232px; }
+  body .content { padding-inline: 26px; }
+}
+
+@media (max-width: 800px) {
+  body :is(.login-page, .register-page, main.page) {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body .login-panel,
+  body .login-panel form,
+  body .register-page .card,
+  body main.page > .card {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  body .login-page .captcha {
+    grid-template-columns: minmax(0, 1fr) 112px;
+  }
+
+  body .login-page :is(input, button),
+  body .register-page :is(input, select, button) {
+    min-width: 0;
+  }
+
+  body .sidebar { width: min(82vw, 300px); }
+  body .workspace { margin-left: 0; }
+  body .topbar { height: 64px; padding-inline: 16px; }
+  body .content { padding: 26px 16px 42px; }
+  body .page-heading { align-items: flex-start; margin-bottom: 22px; }
+  body .page-heading h1 { font-size: 28px; }
+  body .filters { width: 100%; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+  body .filters > * { flex: 0 0 auto; }
+  body .panel { padding: 19px 17px; }
+}
+
+@media (max-width: 480px) {
+  body .content { padding-inline: 12px; }
+  body .metric-card { min-height: 120px; padding: 20px 16px 18px 72px; }
+  body .metric-icon { left: 16px; top: 20px; }
+  body .metric-value { font-size: 24px; }
+  body .login-panel form,
+  body .register-page .card,
+  body main.page > .card { padding: 26px 20px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -856,6 +856,46 @@ def predict_inpatient_cost():
     return success(result, meta={"phase": 2, "enabled": True})
 
 
+@api.get("/v2/predictions/cost-options")
+@timing()
+@permission_required("cost_prediction:use")
+def prediction_cost_options():
+    from app.ml.cost_model import cost_prediction_options
+
+    return success(cost_prediction_options())
+
+
+@api.post("/v2/predictions/future-cost")
+@timing()
+@permission_required("future_cost_prediction:use")
+def predict_future_inpatient_cost():
+    """待入院病例的未来年度成本情景；只接受入院前可知字段。"""
+    from app.ml.cost_model import predict_future_cost
+
+    if not FEATURES.get("ml_analysis"):
+        return fail("费用预测功能未启用", code=503, meta={"phase": 2, "enabled": False}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        result = predict_future_cost(
+            body.get("features"), body.get("forecast_year"), body.get("annual_cost_growth_rate"),
+        )
+    except FileNotFoundError as exc:
+        return fail(str(exc), code=503, meta={"phase": 2, "enabled": False}), 503
+    return success(result, meta={"phase": 2, "enabled": True})
+
+
+@api.post("/v2/forecasts/annual-budget")
+@timing()
+@permission_required("budget_forecast:use")
+def forecast_annual_budget():
+    """医院/服务区域年度预算预测，仅对医生和管理员开放。"""
+    from app.ml.cost_model import forecast_annual_budget as build_forecast
+
+    if not FEATURES.get("ml_analysis"):
+        return fail("费用预测功能未启用", code=503, meta={"phase": 2, "enabled": False}), 503
+    return success(build_forecast(request.get_json(silent=True) or {}), meta={"phase": 2, "enabled": True})
+
+
 @api.route("/v2/<capability>", methods=["GET", "POST"])
 @login_required
 def phase2_placeholder(capability):

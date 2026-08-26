@@ -45,7 +45,8 @@ def test_named_disease_summary_answers_the_selected_disease_directly():
         "metrics": ["avg_length_of_stay"], "filters": {"disease": "Septicemia"},
         "rows": [{"dimension_value": "SEPTICEMIA", "avg_length_of_stay": 9.2898}],
     })
-    assert "SEPTICEMIA" in summary
+    assert "败血症" in summary
+    assert "Septicemia" not in summary
     assert "9.3 天" in summary
     assert "排序首位" not in summary
     assert "不代表个人" in summary

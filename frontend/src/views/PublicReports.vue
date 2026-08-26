@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { publicReports, withdrawReport } from '../api/client'
 import { can, logout } from '../auth'
 
+defineProps({ embedded: { type: Boolean, default: false } })
+
 const router = useRouter()
 const route = useRoute()
 const reports = ref([])
@@ -58,8 +60,8 @@ onBeforeUnmount(() => { if (refreshTimer) window.clearInterval(refreshTimer) })
 </script>
 
 <template>
-  <main class="page">
-    <header><div><button @click="router.push('/overview')">← 返回总览</button><h1>公开健康分析报告</h1><p>以下内容基于脱敏聚合数据，仅供健康科普参考</p></div><button @click="signOut">退出登录</button></header>
+  <main class="page" :class="{ embedded }">
+    <header v-if="!embedded"><div><button @click="router.push('/overview')">← 返回总览</button><h1>公开健康分析报告</h1><p>以下内容基于脱敏聚合数据，仅供健康科普参考</p></div><button @click="signOut">退出登录</button></header>
     <p v-if="error" class="error">{{ error }}</p>
     <section v-if="loading" class="empty">正在加载…</section>
     <section v-else-if="!reports.length" class="empty">暂时没有已发布的公开报告</section>
@@ -74,5 +76,5 @@ onBeforeUnmount(() => { if (refreshTimer) window.clearInterval(refreshTimer) })
 </template>
 
 <style scoped>
-.page{min-height:100vh;padding:34px 6vw;background:#f3f6f6;color:#2b3d3c;font-family:"Segoe UI","Microsoft YaHei",sans-serif}header{display:flex;align-items:start;justify-content:space-between;margin-bottom:25px}button{padding:7px 10px;border:1px solid #d6e0df;border-radius:7px;background:#fff;color:#34736d;cursor:pointer}button:disabled{cursor:wait;opacity:.6}header div>button{padding:0;border:0;background:transparent}h1{margin:14px 0 5px;font-size:27px}header p{color:#899592;font-size:12px}.layout{display:grid;grid-template-columns:280px 1fr;gap:14px}aside,article,.empty{padding:18px;background:#fff;border:1px solid #dfe7e6;border-radius:12px}aside{display:flex;flex-direction:column;gap:7px;align-self:start}aside button{text-align:left;border-color:transparent;background:#f6f9f8}aside button.active{border-color:#b6d8d3;background:#ebf6f4}aside strong,aside small{display:block}aside small{margin-top:5px;color:#8e9997;font-size:9px}article{padding:28px}.article-head{display:flex;align-items:center;justify-content:space-between;gap:15px}.article-head h2{font-size:20px}.withdraw{flex:0 0 auto;color:#a34f48;border-color:#eccbc7;background:#fff7f6}.withdraw:hover{background:#fdecea}.notice{margin:10px 0 18px;padding:9px;color:#3e7771;background:#edf7f5;border-radius:7px;font-size:10px}pre{font:12px/1.85 ui-monospace,Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;word-break:break-word}.empty{text-align:center;color:#879390}.error{padding:10px;color:#a45149;background:#fff0ee;border-radius:7px}@media(max-width:760px){.page{padding:20px}.layout{grid-template-columns:1fr}header>button{display:none}.article-head{align-items:flex-start;flex-direction:column}}
+.page{min-height:100vh;padding:34px 6vw;background:#f3f6f6;color:#2b3d3c;font-family:"Segoe UI","Microsoft YaHei",sans-serif}.page.embedded{min-height:0;padding:0;background:transparent;color:inherit;font-family:inherit}header{display:flex;align-items:start;justify-content:space-between;margin-bottom:25px}button{padding:7px 10px;border:1px solid #d6e0df;border-radius:7px;background:#fff;color:#34736d;cursor:pointer}button:disabled{cursor:wait;opacity:.6}header div>button{padding:0;border:0;background:transparent}h1{margin:14px 0 5px;font-size:27px}header p{color:#899592;font-size:12px}.layout{display:grid;grid-template-columns:280px 1fr;gap:16px}aside,article,.empty{padding:18px;background:#fff;border:1px solid #dfe7e6;border-radius:16px;box-shadow:var(--shadow)}aside{display:flex;flex-direction:column;gap:7px;align-self:start}aside button{text-align:left;border-color:transparent;background:#f6f9f8}aside button.active{border-color:#b6d8d3;background:#ebf6f4}aside strong,aside small{display:block}aside small{margin-top:5px;color:#8e9997;font-size:11px}article{padding:28px}.article-head{display:flex;align-items:center;justify-content:space-between;gap:15px}.article-head h2{font-size:20px}.withdraw{flex:0 0 auto;color:#a34f48;border-color:#eccbc7;background:#fff7f6}.withdraw:hover{background:#fdecea}.notice{margin:10px 0 18px;padding:10px 12px;color:#3e7771;background:#edf7f5;border-radius:9px;font-size:12px}pre{font:13px/1.85 ui-monospace,Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;word-break:break-word}.empty{text-align:center;color:#879390}.error{padding:10px;color:#a45149;background:#fff0ee;border-radius:7px}@media(max-width:760px){.page:not(.embedded){padding:20px}.layout{grid-template-columns:1fr}header>button{display:none}.article-head{align-items:flex-start;flex-direction:column}}
 </style>

@@ -158,6 +158,9 @@ def normalize_filter_value(key: str, value):
         }.get(clean, clean)
     if key == "service_area" and clean == "Capital/Adirond":
         return "Capital/Adirondacks"
-    if key in {"disease", "procedure", "hospital"}:
+    if key == "disease":
+        from app.common import disease_dictionary
+        return disease_dictionary.normalize(clean).upper()
+    if key in {"procedure", "hospital"}:
         return clean.replace("`", "'").upper() if key == "hospital" else clean.upper()
     return clean

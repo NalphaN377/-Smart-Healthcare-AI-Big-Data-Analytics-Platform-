@@ -45,6 +45,32 @@ def test_named_disease_is_used_as_filter_instead_of_global_ranking():
     assert intent["filters"] == {"disease": "Septicemia"}
 
 
+def test_chinese_disease_alias_is_used_as_database_filter():
+    intent = detect_intent("心脏衰竭的平均费用是多少？")
+
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "disease"
+    assert intent["metrics"][0] == "avg_total_charges"
+    assert intent["filters"] == {"disease": "Heart failure"}
+
+
+def test_chinese_disease_short_name_works_without_external_llm():
+    intent = detect_intent("心衰住院量")
+
+    assert intent["status"] == "ready"
+    assert intent["metrics"] == ["count"]
+    assert intent["filters"] == {"disease": "Heart failure"}
+
+
+def test_named_chinese_disease_trend_uses_year_dimension_and_filter():
+    intent = detect_intent("心衰历年趋势")
+
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "year"
+    assert intent["metrics"] == ["count"]
+    assert intent["filters"] == {"disease": "Heart failure"}
+
+
 def test_natural_language_synonyms_are_understood():
     intent = detect_intent("把各医疗机构按次均费用从高到低排一下")
     assert intent["status"] == "ready"
@@ -129,11 +155,29 @@ def test_explicit_disease_overrides_missing_llm_filter():
     assert intent["filters"] == {"disease": "Septicemia"}
 
 
+def test_chinese_disease_dictionary_overrides_llm_chinese_filter():
+    intent = _validated_llm_intent("心脏衰竭平均费用", {
+        "status": "ready", "dimension": "disease", "metrics": ["avg_total_charges"],
+        "chart_type": "bar", "filters": {"disease": "心脏衰竭"}, "confidence": 0.99,
+    })
+
+    assert intent["filters"] == {"disease": "Heart failure"}
+
+
 def test_financial_proxy_metric_is_recognized_but_not_called_real_profit():
     intent = detect_intent("按年度分析利润率")
     assert intent["status"] == "ready"
     assert intent["dimension"] == "year"
     assert "charge_cost_spread_ratio" in intent["metrics"]
+
+
+def test_four_year_charge_cost_spread_ratio_is_executable_and_focused():
+    intent = detect_intent("四年收费成本差额率有什么变化？")
+    assert intent["status"] == "ready"
+    assert intent["dimension"] == "year"
+    assert intent["metrics"] == ["charge_cost_spread_ratio", "count"]
+    assert intent["chart_type"] == "line"
+    assert intent["sort_by"] is None
 
 
 def test_specialized_analysis_topics_are_recognized():

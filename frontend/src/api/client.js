@@ -65,6 +65,13 @@ export function yearTrend(filters = {}) { return request(`/year_trend${queryStri
 export function paymentRatio(filters = {}) { return request(`/payment_ratio${queryString(filters)}`) }
 export function dimensionValues(dimension, limit = 100) { return request(`/dimensions/${dimension}/values?limit=${limit}`) }
 export function predictCost(features) { return request('/v2/predictions/cost', { method: 'POST', body: JSON.stringify({ features }) }) }
+export function costPredictionOptions() { return request('/v2/predictions/cost-options') }
+export function predictFutureCost(features, forecastYear, annualCostGrowthRate) {
+  return request('/v2/predictions/future-cost', {
+    method: 'POST', body: JSON.stringify({ features, forecast_year: forecastYear, annual_cost_growth_rate: annualCostGrowthRate }),
+  })
+}
+export function forecastAnnualBudget(payload) { return request('/v2/forecasts/annual-budget', { method: 'POST', body: JSON.stringify(payload) }) }
 
 export function aggregate(dimension, metrics, limit = 20, filters = {}) {
   return request(`/aggregate${queryString({ dimension, metrics, limit, ...filters })}`)

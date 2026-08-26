@@ -4,7 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from './components/AppIcon.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import DashboardChart from './components/DashboardChart.vue'
-import { analyticsQuery, analyticsTopic, compareHospitals, createReport, dataQuality, dimensionValues, fieldQuality, getReport, health, listHospitals, listNotifications, listReports, overview, predictCost, publishReport, streamChat, withdrawReport } from './api/client'
+import AccountSettings from './views/AccountSettings.vue'
+import PublicReports from './views/PublicReports.vue'
+import suggestionCatalog from '../../config/ai_suggestions.json'
+import diseaseDictionary from '../../config/disease_dictionary.json'
+import diseaseDisplayNames from '../../config/disease_display_names.json'
+import { analyticsQuery, analyticsTopic, compareHospitals, costPredictionOptions, createReport, dataQuality, dimensionValues, fieldQuality, forecastAnnualBudget, getReport, health, listHospitals, listNotifications, listReports, overview, predictCost, predictFutureCost, publishReport, streamChat, withdrawReport } from './api/client'
 import { authState, can, logout } from './auth'
 
 const route = useRoute()
@@ -67,6 +72,16 @@ const searchQuery = ref('')
 const costLoading = ref(false)
 const costError = ref('')
 const costResult = ref(null)
+const budgetResult = ref(null)
+const costMode = ref('encoded')
+const costOptions = ref({ diagnosis: [], procedure: [], apr_drg: [], apr_mdc: [] })
+const budgetHospitalOptions = ref([])
+const futureForecastYear = ref(2025)
+const futureGrowthRate = ref('')
+const budgetForm = reactive({
+  scope_type: 'service_area', scope_value: 'New York City', target_year: 2025,
+  annual_volume_growth_rate: '', annual_cost_growth_rate: '',
+})
 const unreadNotifications = ref(0)
 let notificationTimer = null
 const costForm = reactive({
@@ -96,34 +111,40 @@ const viewMeta = {
   data: { title: '数据资产中心', subtitle: '追踪数据接入、治理质量与服务状态' },
   patients: { title: '患者画像分析', subtitle: '从人口统计学与就诊特征理解患者群体' },
   reports: { title: '分析报告', subtitle: '沉淀专题洞察，形成可复用的决策依据' },
+  'public-reports': { title: '公开健康分析报告', subtitle: '浏览基于脱敏聚合数据发布的健康分析内容' },
+  account: { title: '账户设置', subtitle: '查看账户资料与管理账号安全选项' },
 }
 const currentMeta = computed(() => viewMeta[activeView.value] || viewMeta.overview)
 const formatNumber = (value, digits = 0) => Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: digits })
 const formatOptionalNumber = (value, digits = 0) => value == null || value === '' || !Number.isFinite(Number(value)) ? '—' : formatNumber(value, digits)
 const formatMoney = (value) => `US$${formatNumber(value, 0)}`
 const formatCost = (value) => `US$${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const diseaseNameMap = new Map([
+  ...Object.entries(diseaseDisplayNames).map(([name, chinese]) => [name.trim().toUpperCase(), chinese]),
+  ...diseaseDictionary.flatMap((item) => [item.code, item.canonical, item.english, ...(item.aliases || [])]
+    .filter(Boolean).map((name) => [String(name).trim().toUpperCase(), item.chinese])),
+])
+const formatDiseaseName = (value) => {
+  const raw = String(value || '').trim()
+  return diseaseNameMap.get(raw.toUpperCase()) || raw || '未标注'
+}
+const rawDiseaseFromChartEvent = (event) => event?.data?.rawDisease || event?.name || ''
 const totalRecords = computed(() => Number(dashboard.value.summary?.discharges || 0))
 const patientTotalRecords = computed(() => Number(patientDashboard.value.summary?.discharges || 0))
 const profileSource = computed(() => activeView.value === 'patients' ? patientDashboard.value : dashboard.value)
 const activeFilterChips = computed(() => [
   ...(regionFilter.value !== '全部服务区域' ? [{ key: 'region', label: `区域：${regionFilter.value}` }] : []),
   ...(dateRange.value !== 'all' ? [{ key: 'year', label: `年份：${dateRange.value}` }] : []),
-  ...(drilldownDisease.value ? [{ key: 'disease', label: `疾病：${drilldownDisease.value}` }] : []),
+  ...(drilldownDisease.value ? [{ key: 'disease', label: `疾病：${formatDiseaseName(drilldownDisease.value)}` }] : []),
 ])
 const qualityScore = computed(() => Number(qualityReport.value.overall || 0) * 100)
 const topAgeGroup = computed(() => [...(patientDashboard.value.ages || [])].sort((a, b) => b.count - a.count)[0]?.dimension_value || '暂无')
-const topDiseaseName = computed(() => patientDashboard.value.diseases?.[0]?.dimension_value || '暂无')
+const topDiseaseName = computed(() => formatDiseaseName(patientDashboard.value.diseases?.[0]?.dimension_value || '暂无'))
 const patientPeriodLabel = computed(() => patientFilters.year === 'all' ? `${Math.min(...availableYears.value)}—${Math.max(...availableYears.value)} 年` : `${patientFilters.year} 年`)
 const aiSuggestions = computed(() => {
-  if (can('analytics:financial')) return [
-    '四年收费成本差额率有什么变化？', '做病例组合校正后的医院成本比较',
-    '检查四年数据质量和异常', '分析各区域医院集中度',
-  ]
-  if (can('ai:advanced')) return [
-    '四年主要疾病趋势', '病情严重程度与资源消耗',
-    '急诊入院路径有什么变化？', '不同支付方式的成本差异',
-  ]
-  return ['2021至2024年住院量趋势', '哪些疾病住院量较高？', '不同服务区域住院趋势']
+  if (can('analytics:financial')) return suggestionCatalog.admin
+  if (can('ai:advanced')) return suggestionCatalog.doctor
+  return suggestionCatalog.patient
 })
 
 const selectedComparison = computed(() => {
@@ -168,7 +189,7 @@ const insightItems = computed(() => {
   const topAge = [...(dashboard.value.ages || [])].sort((a, b) => b.count - a.count)[0]
   return [
     { tag: '人群结构', color: 'teal', title: `${topAge?.dimension_value || '主要年龄组'}患者占比最高`, text: `该组共 ${formatNumber(topAge?.count)} 条记录，平均住院日 ${formatNumber(topAge?.avg_length_of_stay, 1)} 天。`, action: '查看患者画像' },
-    { tag: '疾病负担', color: 'amber', title: '重点疾病住院量集中', text: `${topDisease?.dimension_value || '首位疾病'}记录数为 ${formatNumber(topDisease?.count)}，次均费用约 ${formatMoney(topDisease?.avg_total_charges)}。`, action: '查看费用分析' },
+    { tag: '疾病负担', color: 'amber', title: '重点疾病住院量集中', text: `${formatDiseaseName(topDisease?.dimension_value || '首位疾病')}记录数为 ${formatNumber(topDisease?.count)}，次均费用约 ${formatMoney(topDisease?.avg_total_charges)}。`, action: '查看费用分析' },
     { tag: '数据质量', color: 'blue', title: `综合质量评分 ${qualityScore.value.toFixed(2)}%`, text: `本次全量导入 ${formatNumber(lastIngestion.value?.rows_inserted || totalRecords.value)} 条，四维质量评估已完成。`, action: '生成专题报告' },
   ]
 })
@@ -178,7 +199,7 @@ const diseaseRows = computed(() => {
   return (dashboard.value.diseases || []).slice(0, 8).map((row) => {
     const change = Number(growthByDisease.get(row.dimension_value))
     return {
-      name: row.dimension_value || '未标注', count: formatNumber(row.count), days: formatNumber(row.avg_length_of_stay, 1), cost: formatMoney(row.avg_total_charges),
+      rawName: row.dimension_value || '', name: formatDiseaseName(row.dimension_value), count: formatNumber(row.count), days: formatNumber(row.avg_length_of_stay, 1), cost: formatMoney(row.avg_total_charges),
       change: Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '—',
     }
   })
@@ -233,7 +254,7 @@ const patientSegments = computed(() => {
   const highRisk = severity.filter((row) => /major|extreme|重度|极重度/i.test(row.dimension_value || '')).reduce((sum, row) => sum + Number(row.count || 0), 0)
   return [
     { title: `${topAge.dimension_value || '主要年龄'}人群`, detail: '按年龄段住院记录自动识别', count: topAge.count, ratio: topAge.percent, icon: 'activity', tone: 'teal' },
-    { title: '首位疾病人群', detail: topDisease.dimension_value || '暂无疾病分组', count: topDisease.count, ratio: topDisease.percent, icon: 'wallet', tone: 'amber' },
+    { title: '首位疾病人群', detail: formatDiseaseName(topDisease.dimension_value || '暂无疾病分组'), count: topDisease.count, ratio: topDisease.percent, icon: 'wallet', tone: 'amber' },
     { title: '较高严重程度人群', detail: 'APR Major / Extreme 分组', count: highRisk, ratio: patientTotalRecords.value ? highRisk / patientTotalRecords.value * 100 : 0, icon: 'shield', tone: 'red' },
   ]
 })
@@ -244,7 +265,7 @@ const trendOption = computed(() => {
 })
 const ageOption = computed(() => { const rows = ratioRows(profileSource.value.ages || []); return { tooltip: { trigger: 'axis', ...tooltipStyle }, grid: { left: 6, right: 16, top: 14, bottom: 3, containLabel: true }, xAxis: { type: 'value', max: Math.ceil(Math.max(10, ...rows.map((r) => r.percent)) / 5) * 5 + 5, ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: '{value}%' } }, yAxis: { type: 'category', data: rows.map((r) => r.dimension_value), ...axisStyle, axisLine: { show: false } }, series: [{ type: 'bar', barWidth: 10, data: rows.map((r) => Number(r.percent.toFixed(2))), label: { show: true, position: 'right', color: '#53616c', fontSize: 11, formatter: '{c}%' }, itemStyle: { color: (p) => ['#a4d9d3', '#76c5bc', '#43aa9e', '#17837a', '#0c625d'][p.dataIndex % 5], borderRadius: [0, 5, 5, 0] } }] } })
 const paymentOption = computed(() => ({ tooltip: { trigger: 'item', ...tooltipStyle, formatter: '{b}<br/>{c}% · {d}%' }, legend: { orient: 'vertical', right: 0, top: 'middle', icon: 'circle', itemWidth: 8, itemGap: 12, textStyle: { color: '#66747e', fontSize: 10 } }, series: [{ type: 'pie', radius: ['50%', '74%'], center: ['35%', '50%'], padAngle: 2, label: { show: false }, data: (dashboard.value.payments || []).map((r, i) => ({ value: Number((Number(r.ratio || 0) * 100).toFixed(2)), name: r.payment || '未标注', itemStyle: { color: ['#17837a', '#5bb5aa', '#6f92c4', '#e1ad63', '#9d85bd', '#c5ced5'][i % 6] } })) }], graphic: [{ type: 'text', left: '31.5%', top: '43%', style: { text: '支付\n结构', textAlign: 'center', fill: '#50606a', fontSize: 13, lineHeight: 19, fontWeight: 600 } }] }))
-const diseaseOption = computed(() => ({ tooltip: { trigger: 'axis', ...tooltipStyle }, grid: { left: 10, right: 38, top: 14, bottom: 2, containLabel: true }, xAxis: { type: 'value', ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: (v) => `${v / 1000}k` } }, yAxis: { type: 'category', inverse: true, data: (dashboard.value.diseases || []).map((r) => r.dimension_value), ...axisStyle, axisLine: { show: false }, axisLabel: { ...axisStyle.axisLabel, width: 150, overflow: 'truncate', formatter: (value) => value.length > 22 ? `${value.slice(0, 22)}…` : value } }, series: [{ type: 'bar', barWidth: 12, data: (dashboard.value.diseases || []).map((r) => r.count), itemStyle: { color: '#2a8f86', borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', color: '#6c7983', fontSize: 10, formatter: (p) => `${(p.value / 1000).toFixed(1)}k` } }] }))
+const diseaseOption = computed(() => ({ tooltip: { trigger: 'axis', ...tooltipStyle }, grid: { left: 10, right: 38, top: 14, bottom: 2, containLabel: true }, xAxis: { type: 'value', ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: (v) => `${v / 1000}k` } }, yAxis: { type: 'category', inverse: true, data: (dashboard.value.diseases || []).map((r) => formatDiseaseName(r.dimension_value)), ...axisStyle, axisLine: { show: false }, axisLabel: { ...axisStyle.axisLabel, width: 150, overflow: 'truncate' } }, series: [{ type: 'bar', barWidth: 12, data: (dashboard.value.diseases || []).map((r) => ({ value: r.count, rawDisease: r.dimension_value })), itemStyle: { color: '#2a8f86', borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', color: '#6c7983', fontSize: 10, formatter: (p) => `${(p.value / 1000).toFixed(1)}k` } }] }))
 const genderOption = computed(() => { const labels = { F: '女性', M: '男性', U: '未知' }; return { tooltip: { trigger: 'item', ...tooltipStyle }, series: [{ type: 'pie', radius: ['56%', '78%'], center: ['50%', '50%'], label: { show: false }, data: (profileSource.value.genders || []).map((r, i) => ({ value: r.count, name: labels[r.dimension_value] || '未知', itemStyle: { color: ['#2a8f86', '#7398c8', '#d9dfe4'][i % 3] } })) }], graphic: [{ type: 'text', left: 'center', top: '42%', style: { text: `${formatNumber(activeView.value === 'patients' ? patientTotalRecords.value : totalRecords.value)}\n总记录`, textAlign: 'center', fill: '#33444e', fontSize: 12, lineHeight: 20, fontWeight: 600 } }] } })
 const mortalityOption = computed(() => { const rows = ratioRows(profileSource.value.severity || []); return { tooltip: { trigger: 'axis', ...tooltipStyle }, grid: { left: 8, right: 15, top: 18, bottom: 2, containLabel: true }, xAxis: { type: 'category', data: rows.map((r) => r.dimension_value), ...axisStyle }, yAxis: { type: 'value', ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: '{value}%' } }, series: [{ type: 'bar', barWidth: 30, data: rows.map((r) => Number(r.percent.toFixed(2))), itemStyle: { color: (p) => ['#9bd4ce', '#5eb8ae', '#e7b46d', '#d8796e'][p.dataIndex % 4], borderRadius: [5, 5, 0, 0] }, label: { show: true, position: 'top', color: '#6c7983', fontSize: 10, formatter: '{c}%' } }] } })
 
@@ -269,7 +290,7 @@ const diseaseBurdenOption = computed(() => {
     grid: { left: 16, right: 24, top: 20, bottom: 12, containLabel: true },
     xAxis: { type: 'value', name: '平均住院日（天）', nameLocation: 'middle', nameGap: 28, ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } } },
     yAxis: { type: 'value', name: `${burdenCostLabel.value}（USD）`, ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: (value) => `$${formatNumber(value / 1000, 0)}k` } },
-    series: [{ type: 'scatter', data: rows.map((row) => ({ name: row.dimension_value, value: [Number(row.avg_length_of_stay || 0), Number(row[burdenCostMetric.value] || 0), Number(row.count || 0)], symbolSize: bubbleSize(row.count), itemStyle: { color: '#238d84', opacity: .72, borderColor: '#fff', borderWidth: 1 } })), emphasis: { focus: 'series', itemStyle: { opacity: 1 } }, markLine: { silent: true, symbol: 'none', lineStyle: { color: '#9ba7ac', type: 'dashed', width: 1 }, label: { color: '#7d898f', fontSize: 8, formatter: '中位基准' }, data: [{ xAxis: medianStay }, { yAxis: medianCost }] } }],
+    series: [{ type: 'scatter', data: rows.map((row) => ({ name: formatDiseaseName(row.dimension_value), rawDisease: row.dimension_value, value: [Number(row.avg_length_of_stay || 0), Number(row[burdenCostMetric.value] || 0), Number(row.count || 0)], symbolSize: bubbleSize(row.count), itemStyle: { color: '#238d84', opacity: .72, borderColor: '#fff', borderWidth: 1 } })), emphasis: { focus: 'series', itemStyle: { opacity: 1 } }, markLine: { silent: true, symbol: 'none', lineStyle: { color: '#9ba7ac', type: 'dashed', width: 1 }, label: { color: '#7d898f', fontSize: 8, formatter: '中位基准' }, data: [{ xAxis: medianStay }, { yAxis: medianCost }] } }],
   }
 })
 const regionalHeatmapOption = computed(() => {
@@ -290,19 +311,19 @@ const diseaseGrowthOption = computed(() => {
   const meta = growthModeMeta.value
   const rows = activeDiseaseGrowth.value.slice(0, 8).reverse()
   return {
-    tooltip: { trigger: 'axis', ...tooltipStyle, formatter: (items) => { const row = rows[items[0]?.dataIndex]; return `${row?.dimension_value || ''}<br/>${row?.baseline_year}：${formatNumber(row?.baseline_value)}<br/>${row?.latest_year}：${formatNumber(row?.latest_value)}<br/>增长率：${Number(row?.growth_pct || 0).toFixed(1)}%<br/>绝对变化：${Number(row?.absolute_growth || 0) >= 0 ? '+' : ''}${formatNumber(row?.absolute_growth)}` } },
+    tooltip: { trigger: 'axis', ...tooltipStyle, formatter: (items) => { const row = rows[items[0]?.dataIndex]; return `${formatDiseaseName(row?.dimension_value)}<br/>${row?.baseline_year}：${formatNumber(row?.baseline_value)}<br/>${row?.latest_year}：${formatNumber(row?.latest_value)}<br/>增长率：${Number(row?.growth_pct || 0).toFixed(1)}%<br/>绝对变化：${Number(row?.absolute_growth || 0) >= 0 ? '+' : ''}${formatNumber(row?.absolute_growth)}` } },
     grid: { left: 12, right: 35, top: 10, bottom: 5, containLabel: true },
     xAxis: { type: 'value', ...axisStyle, splitLine: { lineStyle: { color: '#edf1f3', type: 'dashed' } }, axisLabel: { ...axisStyle.axisLabel, formatter: (value) => meta.unit === '%' ? `${value}%` : formatNumber(value) } },
-    yAxis: { type: 'category', data: rows.map((row) => row.dimension_value), ...axisStyle, axisLine: { show: false }, axisLabel: { ...axisStyle.axisLabel, width: 135, overflow: 'truncate' } },
-    series: [{ type: 'bar', barWidth: 13, data: rows.map((row) => Number(row[meta.valueKey] || 0)), itemStyle: { color: ({ value }) => value >= 0 ? '#3aa198' : '#d8796e', borderRadius: [0, 5, 5, 0] }, label: { show: true, position: 'right', color: '#65727b', fontSize: 9, formatter: ({ value }) => meta.unit === '%' ? `${value > 0 ? '+' : ''}${value.toFixed(1)}%` : `${value > 0 ? '+' : ''}${formatNumber(value)}` } }],
+    yAxis: { type: 'category', data: rows.map((row) => formatDiseaseName(row.dimension_value)), ...axisStyle, axisLine: { show: false }, axisLabel: { ...axisStyle.axisLabel, width: 135, overflow: 'truncate' } },
+    series: [{ type: 'bar', barWidth: 13, data: rows.map((row) => ({ value: Number(row[meta.valueKey] || 0), rawDisease: row.dimension_value })), itemStyle: { color: ({ value }) => value >= 0 ? '#3aa198' : '#d8796e', borderRadius: [0, 5, 5, 0] }, label: { show: true, position: 'right', color: '#65727b', fontSize: 9, formatter: ({ value }) => meta.unit === '%' ? `${value > 0 ? '+' : ''}${value.toFixed(1)}%` : `${value > 0 ? '+' : ''}${formatNumber(value)}` } }],
   }
 })
 
 const expandedChart = computed(() => ({
-  burden: { title: '疾病负担四象限', subtitle: `平均住院日、${burdenCostLabel.value}与住院规模的综合观察`, option: diseaseBurdenOption.value, onSelect: (event) => drillIntoDisease(event.name) },
+  burden: { title: '疾病负担四象限', subtitle: `平均住院日、${burdenCostLabel.value}与住院规模的综合观察`, option: diseaseBurdenOption.value, onSelect: (event) => drillIntoDisease(rawDiseaseFromChartEvent(event)) },
   regional: { title: '服务区域年度热力图', subtitle: '服务区域与年度住院记录对比', option: regionalHeatmapOption.value, onSelect: drillIntoHeatmap },
-  growth: { title: growthModeMeta.value.title, subtitle: `${growthModeMeta.value.subtitle}，可悬停查看首末年度明细`, option: diseaseGrowthOption.value, onSelect: (event) => drillIntoDisease(event.name) },
-  disease: { title: '重点疾病住院量', subtitle: '重点疾病住院记录规模对比', option: diseaseOption.value, onSelect: (event) => drillIntoDisease(event.name) },
+  growth: { title: growthModeMeta.value.title, subtitle: `${growthModeMeta.value.subtitle}，可悬停查看首末年度明细`, option: diseaseGrowthOption.value, onSelect: (event) => drillIntoDisease(rawDiseaseFromChartEvent(event)) },
+  disease: { title: '重点疾病住院量', subtitle: '重点疾病住院记录规模对比', option: diseaseOption.value, onSelect: (event) => drillIntoDisease(rawDiseaseFromChartEvent(event)) },
   age: { title: '患者年龄结构', subtitle: '各年龄段住院记录占比', option: ageOption.value },
   payment: { title: '支付方式构成', subtitle: '主要支付类型分布', option: paymentOption.value },
 })[expandedChartKey.value] || null)
@@ -372,7 +393,7 @@ function pairedHospitalMix(key) {
     countA: a.get(name)?.count ?? 0, countB: b.get(name)?.count ?? 0,
   })).sort((left, right) => (right.countA + right.countB) - (left.countA + left.countB)).slice(0, 10)
 }
-const hospitalDiseaseMix = computed(() => pairedHospitalMix('disease'))
+const hospitalDiseaseMix = computed(() => pairedHospitalMix('disease').map((row) => ({ ...row, rawName: row.name, name: formatDiseaseName(row.name) })))
 const hospitalSeverityMix = computed(() => pairedHospitalMix('severity'))
 const hospitalAdmissionMix = computed(() => pairedHospitalMix('admission'))
 const hospitalCaseMix = computed(() => ({
@@ -671,17 +692,47 @@ async function send(query, analysisContext = null) {
 }
 async function submitCostPrediction() {
   if (costLoading.value) return
-  costLoading.value = true; costError.value = ''; costResult.value = null
+  costLoading.value = true; costError.value = ''; costResult.value = null; budgetResult.value = null
   try {
     const numericFields = new Set(['discharge_year', 'length_of_stay', 'apr_severity_of_illness_code'])
     const features = Object.fromEntries(Object.entries(costForm)
       .filter(([, value]) => value !== '' && value !== null && value !== undefined)
       .map(([key, value]) => [key, numericFields.has(key) ? Number(value) : String(value).trim()]))
-    const response = await predictCost(features)
+    let response
+    if (costMode.value === 'future') {
+      const allowed = new Set(['hospital_service_area', 'hospital_county', 'age_group', 'gender', 'race', 'ethnicity', 'type_of_admission', 'ccsr_diagnosis_code', 'payment_typology_1', 'emergency_department_indicator'])
+      const futureFeatures = Object.fromEntries(Object.entries(features).filter(([key]) => allowed.has(key)))
+      response = await predictFutureCost(futureFeatures, Number(futureForecastYear.value), futureGrowthRate.value === '' ? null : Number(futureGrowthRate.value))
+    } else response = await predictCost(features)
     costResult.value = response.data
   } catch (error) {
     costError.value = error.message || '费用预测失败，请检查输入后重试。'
   } finally { costLoading.value = false }
+}
+async function submitBudgetForecast() {
+  if (costLoading.value) return
+  costLoading.value = true; costError.value = ''; costResult.value = null; budgetResult.value = null
+  try {
+    const payload = {
+      ...budgetForm, target_year: Number(budgetForm.target_year),
+      annual_volume_growth_rate: budgetForm.annual_volume_growth_rate === '' ? null : Number(budgetForm.annual_volume_growth_rate),
+      annual_cost_growth_rate: budgetForm.annual_cost_growth_rate === '' ? null : Number(budgetForm.annual_cost_growth_rate),
+    }
+    budgetResult.value = (await forecastAnnualBudget(payload)).data
+  } catch (error) { costError.value = error.message || '年度预算预测失败，请检查输入后重试。' } finally { costLoading.value = false }
+}
+function selectCostMode(mode) {
+  costMode.value = mode; costResult.value = null; budgetResult.value = null; costError.value = ''
+  if (mode !== 'budget') void loadCostOptions()
+  if (mode === 'budget') void loadBudgetHospitalOptions()
+}
+async function loadCostOptions() {
+  if (costOptions.value.diagnosis.length) return
+  try { costOptions.value = (await costPredictionOptions()).data || costOptions.value } catch (_error) { /* 留空时仍允许手工输入 */ }
+}
+async function loadBudgetHospitalOptions() {
+  if (budgetHospitalOptions.value.length) return
+  try { budgetHospitalOptions.value = (await listHospitals('', '', 300)).data || [] } catch (_error) { /* 允许手工输入作为降级 */ }
 }
 function resetCostPrediction() {
   Object.assign(costForm, {
@@ -694,6 +745,7 @@ function resetCostPrediction() {
     apr_severity_of_illness_code: 3,
   })
   costResult.value = null; costError.value = ''
+  budgetResult.value = null
 }
 function sectionsForReport(report) {
   if (!report) return undefined
@@ -747,7 +799,15 @@ watch(activeView, (view) => {
   if (view === 'data' && can('data_asset:read') && !(qualityMatrix.value.fields || []).length) loadFieldQuality()
   if (view === 'patients' && can('patient_profile:read')) loadPatientProfile()
   if (view === 'reports' && can('report:generate')) loadReportLibrary()
+  if (view === 'cost-prediction') {
+    if (costMode.value === 'budget') void loadBudgetHospitalOptions()
+    else void loadCostOptions()
+  }
 }, { immediate: true })
+watch(() => budgetForm.scope_type, (scopeType) => {
+  budgetForm.scope_value = scopeType === 'service_area' ? 'New York City' : ''
+  if (scopeType === 'hospital') void loadBudgetHospitalOptions()
+})
 onBeforeUnmount(() => {
   if (notificationTimer) window.clearInterval(notificationTimer)
   window.removeEventListener('keydown', handleChartModalKeydown)
@@ -781,7 +841,7 @@ onBeforeUnmount(() => {
         <template v-if="activeView === 'overview'">
           <section class="metric-grid"><article v-for="metric in metrics" :key="metric.label" class="metric-card"><div class="metric-icon" :class="metric.tone"><AppIcon :name="metric.icon" :size="21" /></div><div class="metric-top"><span>{{ metric.label }}</span><button>•••</button></div><div class="metric-value">{{ metric.value }} <small>{{ metric.unit }}</small></div><div class="metric-foot" :class="metric.direction"><span><AppIcon :name="metric.direction === 'up' ? 'arrow-up' : 'arrow-down'" :size="11" />{{ metric.trend }}</span>{{ metric.note }}</div></article></section>
           <section v-if="compareOpen" class="panel comparison-panel">
-            <div class="comparison-head"><div><span class="eyebrow">COMPARE</span><h2>双对象运营比较</h2><p>{{ drilldownDisease ? `当前疾病：${drilldownDisease}` : '当前疾病范围：全部' }}</p></div><div class="comparison-tabs"><button :class="{ active: comparisonType === 'year' }" @click="setComparisonType('year')">年份对比</button><button :class="{ active: comparisonType === 'region' }" @click="setComparisonType('region')">区域对比</button><button :class="{ active: comparisonType === 'hospital' }" @click="setComparisonType('hospital')">医院对比</button></div></div>
+            <div class="comparison-head"><div><span class="eyebrow">COMPARE</span><h2>双对象运营比较</h2><p>{{ drilldownDisease ? `当前疾病：${formatDiseaseName(drilldownDisease)}` : '当前疾病范围：全部' }}</p></div><div class="comparison-tabs"><button :class="{ active: comparisonType === 'year' }" @click="setComparisonType('year')">年份对比</button><button :class="{ active: comparisonType === 'region' }" @click="setComparisonType('region')">区域对比</button><button :class="{ active: comparisonType === 'hospital' }" @click="setComparisonType('hospital')">医院对比</button></div></div>
             <div class="comparison-controls"><label>对象 A<select v-model="comparisonA" @change="hospitalComparison = null"><option v-for="item in comparisonOptions" :key="`a-${item.value}`" :value="item.value">{{ item.label }}</option></select></label><span>VS</span><label>对象 B<select v-model="comparisonB" @change="hospitalComparison = null"><option v-for="item in comparisonOptions" :key="`b-${item.value}`" :value="item.value">{{ item.label }}</option></select></label><button v-if="comparisonType === 'hospital'" class="compare-run" :disabled="hospitalComparisonLoading || !comparisonOptions.length" @click="runHospitalComparison">{{ hospitalComparisonLoading ? '正在比较…' : '开始比较' }}</button><button class="ai-action" :disabled="comparisonType === 'hospital' && !hospitalComparison" @click="analyzeOverview('comparison')"><AppIcon name="sparkle" :size="13" /> AI 解读差异</button></div>
             <p v-if="comparisonType === 'hospital' && !hospitalOptions.length && !hospitalComparisonError" class="hospital-compare-status">正在加载可比较的医疗机构…</p>
             <p v-if="hospitalComparisonError" class="hospital-compare-status error"><AppIcon name="info" :size="13" /> {{ hospitalComparisonError }}</p>
@@ -790,9 +850,13 @@ onBeforeUnmount(() => {
             </template>
             <div v-if="comparisonType === 'hospital' && hospitalComparison" class="hospital-compare-grid">
               <article class="hospital-trend"><div class="hospital-section-head"><div><h3>年度规模与住院日趋势</h3><p>柱形为住院记录，折线为平均住院日</p></div><span>A / B</span></div><DashboardChart :option="hospitalTrendOption" height="300px" /></article>
-              <article class="hospital-mix-card"><div class="hospital-section-head"><div><h3>重点疾病构成</h3><p>展示两院病例构成占比与记录数</p></div><span>前 10 项</span></div><div class="hospital-mix-table"><div v-for="row in hospitalDiseaseMix" :key="row.name" class="hospital-mix-row"><strong :title="row.name">{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}% · {{ formatNumber(row.countA) }}</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}% · {{ formatNumber(row.countB) }}</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
-              <article v-if="authState.user?.role !== 'patient'" class="hospital-mix-card"><div class="hospital-section-head"><div><h3>病例严重程度</h3><p>辅助判断病例结构差异</p></div><span>临床运营</span></div><div class="hospital-mix-table compact"><div v-for="row in hospitalSeverityMix" :key="row.name" class="hospital-mix-row"><strong>{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}%</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}%</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
-              <article v-if="authState.user?.role !== 'patient'" class="hospital-mix-card"><div class="hospital-section-head"><div><h3>入院类型构成</h3><p>比较急诊、择期等来源结构</p></div><span>临床运营</span></div><div class="hospital-mix-table compact"><div v-for="row in hospitalAdmissionMix" :key="row.name" class="hospital-mix-row"><strong>{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}%</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}%</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
+              <div class="hospital-detail-mosaic" :class="{ single: authState.user?.role === 'patient' }">
+                <article class="hospital-mix-card disease-mix-card"><div class="hospital-section-head"><div><h3>重点疾病构成</h3><p>展示两院病例构成占比与记录数</p></div><span>前 10 项</span></div><div class="hospital-mix-table"><div v-for="row in hospitalDiseaseMix" :key="row.rawName" class="hospital-mix-row"><strong :title="row.name">{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}% · {{ formatNumber(row.countA) }}</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}% · {{ formatNumber(row.countB) }}</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
+                <div v-if="authState.user?.role !== 'patient'" class="hospital-side-stack">
+                  <article class="hospital-mix-card severity-mix-card"><div class="hospital-section-head"><div><h3>病例严重程度</h3><p>辅助判断病例结构差异</p></div><span>临床运营</span></div><div class="hospital-mix-table compact"><div v-for="row in hospitalSeverityMix" :key="row.name" class="hospital-mix-row"><strong>{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}%</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}%</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
+                  <article class="hospital-mix-card admission-mix-card"><div class="hospital-section-head"><div><h3>入院类型构成</h3><p>比较急诊、择期等来源结构</p></div><span>临床运营</span></div><div class="hospital-mix-table compact"><div v-for="row in hospitalAdmissionMix" :key="row.name" class="hospital-mix-row"><strong>{{ row.name }}</strong><div><span>A {{ row.a.toFixed(1) }}%</span><i><em class="mix-a" :style="{ width: `${Math.min(row.a, 100)}%` }"></em></i></div><div><span>B {{ row.b.toFixed(1) }}%</span><i><em class="mix-b" :style="{ width: `${Math.min(row.b, 100)}%` }"></em></i></div></div></div></article>
+                </div>
+              </div>
               <article v-if="authState.user?.role === 'admin' && (hospitalCaseMix.a || hospitalCaseMix.b)" class="hospital-case-mix"><div class="hospital-section-head"><div><h3>病例组合校正基准</h3><p>按年度、APR DRG 与严重程度计算观察/预期指数，1.00 为基准</p></div><span>管理员</span></div><div class="case-mix-grid"><div v-for="(row, key) in hospitalCaseMix" :key="key"><b>医院 {{ key.toUpperCase() }}</b><strong>{{ formatOptionalNumber(row?.case_mix_cost_index, 2) }}</strong><small>成本指数</small><strong>{{ formatOptionalNumber(row?.case_mix_los_index, 2) }}</strong><small>住院日指数</small><p>次均实际 / 预期成本：{{ formatOptionalNumber(row?.avg_actual_cost, 0) }} / {{ formatOptionalNumber(row?.avg_expected_cost, 0) }} 美元</p></div></div></article>
             </div>
             <p v-if="comparisonType === 'hospital' && hospitalComparison" class="hospital-caveat">住院记录不是去重患者人数；账单收费不是实际收入。医院差异仅用于运营分析，不代表医疗质量评级。</p>
@@ -806,7 +870,7 @@ onBeforeUnmount(() => {
           </section>
           <p class="analytics-caveat">费用为名义美元，未进行通胀调整；增长和区域差异仅用于运营分析，不代表因果关系或医疗质量排名。</p>
           <section v-if="can('patient_profile:read')" class="dashboard-grid secondary-row"><article class="panel chart-click-card" tabindex="0" aria-label="点击放大重点疾病住院量" @click="openExpandedChart('disease')" @keydown.enter.self="openExpandedChart('disease')"><div class="panel-head"><div><h2>重点疾病住院量</h2><p>点击模块放大；大图中点击疾病下钻</p></div></div><DashboardChart :option="diseaseOption" height="235px" /></article><article class="panel chart-click-card" tabindex="0" aria-label="点击放大患者年龄结构" @click="openExpandedChart('age')" @keydown.enter.self="openExpandedChart('age')"><div class="panel-head"><div><h2>患者年龄结构</h2><p>点击模块放大查看年龄段占比</p></div></div><DashboardChart :option="ageOption" height="235px" /></article><article class="panel chart-click-card" tabindex="0" aria-label="点击放大支付方式构成" @click="openExpandedChart('payment')" @keydown.enter.self="openExpandedChart('payment')"><div class="panel-head"><div><h2>支付方式构成</h2><p>点击模块放大查看支付类型分布</p></div></div><DashboardChart :option="paymentOption" height="235px" /></article></section>
-          <section v-if="can('patient_profile:read')" class="panel data-table-panel"><div class="panel-head"><div><h2>重点疾病运营明细</h2><p>住院量、平均住院日与次均费用对比</p></div><button class="text-button" @click="selectView('reports')">查看完整报告 <AppIcon name="arrow-right" :size="14" /></button></div><div class="table-wrap"><table><thead><tr><th>疾病类别</th><th>出院人次</th><th>平均住院日</th><th>次均费用</th><th>首末年变化</th><th></th></tr></thead><tbody><tr v-for="row in diseaseRows" :key="row.name"><td><span class="disease-dot"></span><strong>{{ row.name }}</strong></td><td>{{ row.count }}</td><td>{{ row.days }} 天</td><td>{{ row.cost }}</td><td><em :class="row.change.startsWith('-') ? 'negative' : 'positive'">{{ row.change }}</em></td><td><button class="row-action" @click="analyzeDisease(row.name)"><AppIcon name="arrow-right" :size="14" /></button></td></tr></tbody></table></div></section>
+          <section v-if="can('patient_profile:read')" class="panel data-table-panel"><div class="panel-head"><div><h2>重点疾病运营明细</h2><p>住院量、平均住院日与次均费用对比</p></div><button class="text-button" @click="selectView('reports')">查看完整报告 <AppIcon name="arrow-right" :size="14" /></button></div><div class="table-wrap"><table><thead><tr><th>疾病类别</th><th>出院人次</th><th>平均住院日</th><th>次均费用</th><th>首末年变化</th><th></th></tr></thead><tbody><tr v-for="row in diseaseRows" :key="row.rawName"><td><span class="disease-dot"></span><strong>{{ row.name }}</strong></td><td>{{ row.count }}</td><td>{{ row.days }} 天</td><td>{{ row.cost }}</td><td><em :class="row.change.startsWith('-') ? 'negative' : 'positive'">{{ row.change }}</em></td><td><button class="row-action" @click="analyzeDisease(row.rawName)"><AppIcon name="arrow-right" :size="14" /></button></td></tr></tbody></table></div></section>
         </template>
 
         <template v-else-if="activeView === 'ai'">
@@ -816,8 +880,9 @@ onBeforeUnmount(() => {
         <template v-else-if="activeView === 'cost-prediction'">
           <div class="cost-layout">
             <section class="panel cost-form-panel">
-              <div class="panel-head"><div><h2>住院编码信息</h2><p>未填写字段由模型按训练数据缺失值规则处理，填写越完整通常越可靠</p></div><span class="model-badge">机器学习模型 · 2024测试集验证</span></div>
-              <form class="cost-form" @submit.prevent="submitCostPrediction">
+              <div class="panel-head"><div><h2>{{ costMode === 'encoded' ? '已编码住院信息' : costMode === 'future' ? '待入院病例信息' : '年度预算范围' }}</h2><p>{{ costMode === 'encoded' ? '使用完整编码估算最终成本；未填写字段按训练数据缺失规则处理' : costMode === 'future' ? '仅使用入院前可知信息，并按未来年度成本增长情景估算' : '按医院或服务区域的历史病例量与次均成本趋势生成预算情景' }}</p></div><span class="model-badge">{{ costMode === 'budget' ? '趋势情景预测' : '机器学习模型 · 2024测试集验证' }}</span></div>
+              <div class="ranking-tabs cost-mode-tabs"><button type="button" :class="{ active: costMode === 'encoded' }" @click="selectCostMode('encoded')">已编码病例估算</button><button type="button" :class="{ active: costMode === 'future' }" @click="selectCostMode('future')">未来病例预测</button><button v-if="can('budget_forecast:use')" type="button" :class="{ active: costMode === 'budget' }" @click="selectCostMode('budget')">年度预算预测</button></div>
+              <form v-if="costMode !== 'budget'" class="cost-form" @submit.prevent="submitCostPrediction">
                 <div class="cost-form-section"><h3>基本与入院信息</h3><div class="cost-field-grid">
                   <label><span>服务区域</span><select v-model="costForm.hospital_service_area"><option value="">未知</option><option>New York City</option><option>Long Island</option><option>Hudson Valley</option><option>Capital/Adirondacks</option><option>Central NY</option><option>Western NY</option><option>Southern Tier</option><option>Finger Lakes</option></select></label>
                   <label><span>医院所在县</span><input v-model.trim="costForm.hospital_county" maxlength="100" placeholder="例如 Manhattan" /></label>
@@ -827,15 +892,15 @@ onBeforeUnmount(() => {
                   <label><span>族裔</span><input v-model.trim="costForm.ethnicity" maxlength="50" placeholder="可选" /></label>
                   <label><span>入院类型</span><select v-model="costForm.type_of_admission"><option value="">未知</option><option>Emergency</option><option>Urgent</option><option>Elective</option><option>Newborn</option><option>Trauma</option><option>Not Available</option></select></label>
                   <label><span>急诊标志</span><select v-model="costForm.emergency_department_indicator"><option value="">未知</option><option value="Y">Y · 是</option><option value="N">N · 否</option></select></label>
-                  <label><span>出院年份</span><input v-model.number="costForm.discharge_year" type="number" min="2000" max="2100" required /></label>
-                  <label><span>住院日</span><input v-model.number="costForm.length_of_stay" type="number" min="0" max="3650" step="1" required /></label>
+                  <label v-if="costMode === 'encoded'"><span>出院年份</span><input v-model.number="costForm.discharge_year" type="number" min="2000" max="2100" required /></label>
+                  <label v-if="costMode === 'encoded'"><span>住院日</span><input v-model.number="costForm.length_of_stay" type="number" min="0" max="3650" step="1" required /></label>
                 </div></div>
 
-                <div class="cost-form-section"><h3>诊断、手术与分组编码</h3><div class="cost-field-grid">
-                  <label><span>CCSR 诊断编码</span><input v-model.trim="costForm.ccsr_diagnosis_code" maxlength="20" placeholder="例如 CIR019" /></label>
-                  <label><span>CCSR 手术编码</span><input v-model.trim="costForm.ccsr_procedure_code" maxlength="20" placeholder="例如 CAR024" /></label>
-                  <label><span>APR DRG 编码</span><input v-model.trim="costForm.apr_drg_code" maxlength="20" placeholder="可选" /></label>
-                  <label><span>APR MDC 编码</span><input v-model.trim="costForm.apr_mdc_code" maxlength="10" placeholder="可选" /></label>
+                <div v-if="costMode === 'encoded'" class="cost-form-section"><h3>诊断、手术与分组编码</h3><div class="cost-field-grid">
+                  <label><span>CCSR 诊断编码</span><select v-model="costForm.ccsr_diagnosis_code"><option value="">未知 / 未选择</option><option v-for="item in costOptions.diagnosis" :key="`dx-${item.code}`" :value="item.code">{{ item.code }}{{ item.description ? ` · ${item.description}` : '' }}</option></select></label>
+                  <label><span>CCSR 手术编码</span><select v-model="costForm.ccsr_procedure_code"><option value="">未知 / 未选择</option><option v-for="item in costOptions.procedure" :key="`px-${item.code}`" :value="item.code">{{ item.code }}{{ item.description ? ` · ${item.description}` : '' }}</option></select></label>
+                  <label><span>APR DRG 编码</span><select v-model="costForm.apr_drg_code"><option value="">未知 / 未选择</option><option v-for="item in costOptions.apr_drg" :key="`drg-${item.code}`" :value="item.code">{{ item.code }}{{ item.description ? ` · ${item.description}` : '' }}</option></select></label>
+                  <label><span>APR MDC 编码</span><select v-model="costForm.apr_mdc_code"><option value="">未知 / 未选择</option><option v-for="item in costOptions.apr_mdc" :key="`mdc-${item.code}`" :value="item.code">{{ item.code }}{{ item.description ? ` · ${item.description}` : '' }}</option></select></label>
                   <label><span>严重程度编码</span><select v-model.number="costForm.apr_severity_of_illness_code"><option :value="0">0 · 未知</option><option :value="1">1 · Minor</option><option :value="2">2 · Moderate</option><option :value="3">3 · Major</option><option :value="4">4 · Extreme</option></select></label>
                   <label><span>严重程度描述</span><select v-model="costForm.apr_severity_of_illness_desc"><option value="">未知</option><option>Minor</option><option>Moderate</option><option>Major</option><option>Extreme</option></select></label>
                   <label><span>死亡风险</span><select v-model="costForm.apr_risk_of_mortality"><option value="">未知</option><option>Minor</option><option>Moderate</option><option>Major</option><option>Extreme</option></select></label>
@@ -843,8 +908,27 @@ onBeforeUnmount(() => {
                   <label class="wide"><span>主要支付方式</span><select v-model="costForm.payment_typology_1"><option value="">未知</option><option>Medicare</option><option>Medicaid</option><option>Private Health Insurance</option><option>Self-Pay</option><option>Blue Cross/Blue Shield</option><option>Federal/State/Local/VA</option><option>Miscellaneous/Other</option></select></label>
                 </div></div>
 
+                <div v-else class="cost-form-section"><h3>入院前诊断与未来情景</h3><div class="cost-field-grid">
+                  <label><span>初步 CCSR 诊断编码</span><select v-model="costForm.ccsr_diagnosis_code"><option value="">未知 / 未选择</option><option v-for="item in costOptions.diagnosis" :key="`future-dx-${item.code}`" :value="item.code">{{ item.code }}{{ item.description ? ` · ${item.description}` : '' }}</option></select></label>
+                  <label><span>预计支付方式</span><select v-model="costForm.payment_typology_1"><option value="">未知</option><option>Medicare</option><option>Medicaid</option><option>Private Health Insurance</option><option>Self-Pay</option><option>Blue Cross/Blue Shield</option><option>Federal/State/Local/VA</option><option>Miscellaneous/Other</option></select></label>
+                  <label><span>预测年度</span><input v-model.number="futureForecastYear" type="number" min="2025" max="2034" required /></label>
+                  <label class="with-hint"><span>年度成本增长率</span><input v-model.number="futureGrowthRate" type="number" min="-0.2" max="0.2" step="0.005" placeholder="留空则采用历史趋势" /><small>如 0.03 表示 3%</small></label>
+                </div></div>
+
                 <div v-if="costError" class="cost-error"><AppIcon name="info" :size="15" />{{ costError }}</div>
                 <div class="cost-actions"><button type="button" class="outline-button" @click="resetCostPrediction">重置</button><button type="submit" class="primary-button" :disabled="costLoading"><AppIcon name="sparkle" :size="15" />{{ costLoading ? '预测中…' : '开始预测' }}</button></div>
+              </form>
+              <form v-else class="cost-form" @submit.prevent="submitBudgetForecast">
+                <div class="cost-form-section"><h3>预算范围与情景</h3><div class="cost-field-grid">
+                  <label><span>预算范围</span><select v-model="budgetForm.scope_type"><option value="service_area">服务区域</option><option value="hospital">医院</option></select></label>
+                  <label v-if="budgetForm.scope_type === 'service_area'"><span>服务区域</span><select v-model="budgetForm.scope_value"><option>New York City</option><option>Long Island</option><option>Hudson Valley</option><option>Capital/Adirondacks</option><option>Central NY</option><option>Western NY</option><option>Southern Tier</option><option>Finger Lakes</option></select></label>
+                  <label v-else><span>医院名称</span><select v-model="budgetForm.scope_value" required><option value="">请选择医院</option><option v-for="item in budgetHospitalOptions" :key="`budget-hospital-${item.hospital}`" :value="item.hospital">{{ item.hospital }}{{ item.service_area ? ` · ${item.service_area}` : '' }}</option></select></label>
+                  <label><span>目标年度</span><input v-model.number="budgetForm.target_year" type="number" min="2025" max="2034" required /></label>
+                  <label><span>年度病例量增长率</span><input v-model.number="budgetForm.annual_volume_growth_rate" type="number" min="-0.2" max="0.2" step="0.005" placeholder="留空则采用历史趋势" /></label>
+                  <label><span>年度次均成本增长率</span><input v-model.number="budgetForm.annual_cost_growth_rate" type="number" min="-0.2" max="0.2" step="0.005" placeholder="留空则采用历史趋势" /></label>
+                </div></div>
+                <div v-if="costError" class="cost-error"><AppIcon name="info" :size="15" />{{ costError }}</div>
+                <div class="cost-actions"><button type="submit" class="primary-button" :disabled="costLoading"><AppIcon name="sparkle" :size="15" />{{ costLoading ? '预测中…' : '生成年度预算' }}</button></div>
               </form>
             </section>
 
@@ -854,7 +938,8 @@ onBeforeUnmount(() => {
                 <strong>{{ formatCost(costResult.predicted_total_cost) }}</strong>
                 <div class="cost-band"><span>近似误差范围</span><b>{{ formatCost(costResult.approximate_error_band?.lower) }} — {{ formatCost(costResult.approximate_error_band?.upper) }}</b><small>基于 2024 时间外测试集 MAE，不是统计置信区间</small></div>
               </article>
-              <article v-else class="panel cost-empty"><span><AppIcon name="wallet" :size="30" /></span><h2>等待预测</h2><p>填写左侧住院编码信息并点击“开始预测”，结果将在这里显示。</p></article>
+              <article v-else-if="budgetResult" class="cost-result-card"><span class="result-kicker">FORECAST ANNUAL BUDGET</span><p>{{ budgetResult.target_year }} 年预测总预算</p><strong>{{ formatCost(budgetResult.forecast_total_cost) }}</strong><div class="cost-band"><span>预计病例量 / 次均成本</span><b>{{ formatNumber(budgetResult.forecast_case_count) }} 例 · {{ formatCost(budgetResult.forecast_average_cost) }}</b><small>基准：{{ budgetResult.baseline?.year }} 年；病例量与成本增长率均可调整</small></div></article>
+              <article v-else class="panel cost-empty"><span><AppIcon name="wallet" :size="30" /></span><h2>等待预测</h2><p>选择模式、填写必要信息后开始预测，结果将在这里显示。</p></article>
 
               <article v-if="costResult" class="panel model-metrics-card"><div class="panel-head"><div><h2>模型验证指标</h2><p>{{ costResult.model?.version }} · 数据版本 {{ costResult.model?.training_data_version }}</p></div><span class="status-tag">已激活</span></div><div class="model-metrics">
                 <div><span>R²</span><strong>{{ Number(costResult.model?.metrics?.r2 || 0).toFixed(4) }}</strong></div>
@@ -862,7 +947,7 @@ onBeforeUnmount(() => {
                 <div><span>中位误差</span><strong>{{ formatCost(costResult.model?.metrics?.median_absolute_error) }}</strong></div>
                 <div><span>RMSE</span><strong>{{ formatCost(costResult.model?.metrics?.rmse) }}</strong></div>
               </div></article>
-              <article class="cost-safety-note"><AppIcon name="shield" :size="18" /><div><strong>使用范围</strong><p>这是基于已编码住院信息的运营成本估算，单位为美元。不能作为入院前承诺、患者结算金额、保险理赔结果或医疗决策依据。</p></div></article>
+              <article class="cost-safety-note"><AppIcon name="shield" :size="18" /><div><strong>使用范围</strong><p>{{ costMode === 'encoded' ? '这是基于已编码住院信息的运营成本估算。' : costMode === 'future' ? '这是基于入院前可知信息和年度成本增长情景的未来病例估算。' : '这是基于历史病例量和次均成本趋势的年度预算情景。' }}单位为美元，不能作为患者结算金额、保险理赔结果、财务承诺或医疗决策依据。</p></div></article>
             </section>
           </div>
         </template>
@@ -876,7 +961,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeView === 'patients'">
-          <section class="panel patient-filter-panel"><div class="panel-head"><div><h2>患者群体筛选</h2><p>以下筛选同步作用于指标、图表和重点分群</p></div><button class="text-button" @click="resetPatientFilters">重置全部</button></div><div class="patient-filter-grid"><label><span>年份</span><select v-model="patientFilters.year" @change="loadPatientProfile"><option value="all">全部年份</option><option v-for="year in availableYears" :key="year" :value="String(year)">{{ year }} 年</option></select></label><label><span>服务区域</span><select v-model="patientFilters.service_area" @change="loadPatientProfile"><option value="">全部区域</option><option v-for="region in ['New York City','Long Island','Hudson Valley','Capital/Adirondacks','Central NY','Western NY','Southern Tier','Finger Lakes']" :key="region">{{ region }}</option></select></label><label><span>疾病</span><select v-model="patientFilters.disease" @change="loadPatientProfile"><option value="">全部疾病</option><option v-for="item in patientDiseaseOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>医院</span><select v-model="patientFilters.hospital" @change="loadPatientProfile"><option value="">全部医院</option><option v-for="item in patientHospitalOptions" :key="item.hospital" :value="item.hospital">{{ item.hospital }}</option></select></label><label><span>年龄段</span><select v-model="patientFilters.age_group" @change="loadPatientProfile"><option value="">全部年龄</option><option value="0-17">0—17</option><option value="18-29">18—29</option><option value="30-49">30—49</option><option value="50-69">50—69</option><option value="70+">70+</option></select></label><label><span>性别</span><select v-model="patientFilters.gender" @change="loadPatientProfile"><option value="">全部性别</option><option value="F">女性</option><option value="M">男性</option><option value="U">未知</option></select></label></div><p v-if="patientError" class="patient-filter-error">{{ patientError }}</p></section>
+          <section class="panel patient-filter-panel"><div class="panel-head"><div><h2>患者群体筛选</h2><p>以下筛选同步作用于指标、图表和重点分群</p></div><button class="text-button" @click="resetPatientFilters">重置全部</button></div><div class="patient-filter-grid"><label><span>年份</span><select v-model="patientFilters.year" @change="loadPatientProfile"><option value="all">全部年份</option><option v-for="year in availableYears" :key="year" :value="String(year)">{{ year }} 年</option></select></label><label><span>服务区域</span><select v-model="patientFilters.service_area" @change="loadPatientProfile"><option value="">全部区域</option><option v-for="region in ['New York City','Long Island','Hudson Valley','Capital/Adirondacks','Central NY','Western NY','Southern Tier','Finger Lakes']" :key="region">{{ region }}</option></select></label><label><span>疾病</span><select v-model="patientFilters.disease" @change="loadPatientProfile"><option value="">全部疾病</option><option v-for="item in patientDiseaseOptions" :key="item" :value="item">{{ formatDiseaseName(item) }}</option></select></label><label><span>医院</span><select v-model="patientFilters.hospital" @change="loadPatientProfile"><option value="">全部医院</option><option v-for="item in patientHospitalOptions" :key="item.hospital" :value="item.hospital">{{ item.hospital }}</option></select></label><label><span>年龄段</span><select v-model="patientFilters.age_group" @change="loadPatientProfile"><option value="">全部年龄</option><option value="0-17">0—17</option><option value="18-29">18—29</option><option value="30-49">30—49</option><option value="50-69">50—69</option><option value="70+">70+</option></select></label><label><span>性别</span><select v-model="patientFilters.gender" @change="loadPatientProfile"><option value="">全部性别</option><option value="F">女性</option><option value="M">男性</option><option value="U">未知</option></select></label></div><p v-if="patientError" class="patient-filter-error">{{ patientError }}</p></section>
           <section class="patient-banner" :class="{ loading: patientLoading }"><div><span>住院患者群体概览</span><strong>{{ formatNumber(patientTotalRecords) }} <small>出院记录</small></strong><p>当前分析周期：{{ patientPeriodLabel }} · 记录口径并非去重患者人数</p></div><div class="banner-stat"><span>主要年龄组</span><strong>{{ topAgeGroup }}</strong></div><div class="banner-stat"><span>首位疾病</span><strong>{{ topDiseaseName }}</strong></div><div class="banner-stat"><span>筛选维度</span><strong>{{ Object.values(patientFilters).filter(value => value && value !== 'all').length }} 项</strong></div></section>
           <section class="dashboard-grid patient-charts"><article class="panel"><div class="panel-head"><div><h2>年龄段分布</h2><p>患者人口统计学结构</p></div></div><DashboardChart :option="ageOption" height="290px" /></article><article class="panel"><div class="panel-head"><div><h2>性别构成</h2><p>住院出院记录占比</p></div></div><div class="gender-chart-wrap"><DashboardChart :option="genderOption" height="260px" /><div class="gender-legend"><span v-for="item in genderLegend" :key="item.label"><i :class="item.className"></i>{{ item.label }} <strong>{{ item.percent }}%</strong></span></div></div></article><article class="panel"><div class="panel-head"><div><h2>病情严重程度</h2><p>APR 严重程度分级</p></div></div><DashboardChart :option="mortalityOption" height="290px" /></article></section>
           <section class="patient-segments"><div class="panel-head"><div><h2>重点患者分群</h2><p>基于年龄、疾病与严重程度的实时聚合结果</p></div><button class="text-button" @click="selectView('ai')">使用 AI 深入分析 <AppIcon name="arrow-right" :size="14" /></button></div><div class="segment-grid"><article v-for="segment in patientSegments" :key="segment.title"><span class="segment-icon" :class="segment.tone"><AppIcon :name="segment.icon" :size="19" /></span><div><strong>{{ segment.title }}</strong><p>{{ segment.detail }}</p><small>{{ formatNumber(segment.count) }} 条 · 占 {{ Number(segment.ratio || 0).toFixed(1) }}%</small></div></article></div></section>
@@ -888,6 +973,14 @@ onBeforeUnmount(() => {
           <section class="report-grid"><article v-for="report in filteredReportCards" :key="`${reportFilter}-${report.title}`" class="report-card report-card-enter"><div class="report-cover" :class="report.color"><span class="report-type">{{ report.type }}</span><AppIcon :name="report.icon" :size="42" :stroke-width="1.4" /><i></i><i></i><i></i></div><div class="report-body"><small>{{ report.date }}</small><h2>{{ report.title }}</h2><p>{{ report.desc }}</p><div><button @click="generateReport(report)">生成报告 <AppIcon name="arrow-right" :size="13" /></button><button class="icon-button" :disabled="!reportContent" @click="downloadReport"><AppIcon name="download" :size="15" /></button></div></div></article></section>
           <section v-if="reportContent" class="panel generated-report"><div class="panel-head"><div><h2>{{ reportTitle || '最新生成报告' }}</h2><p>Markdown 实时预览</p></div><div class="result-actions"><button v-if="can('system:manage') && reportId" title="发布为公开报告" @click="publishGeneratedReport"><AppIcon name="check" :size="15" /></button><button @click="downloadReport"><AppIcon name="download" :size="15" /></button><button @click="reportContent = ''; reportId = null; reportTitle = ''"><AppIcon name="close" :size="15" /></button></div></div><pre>{{ reportContent }}</pre></section>
           <section class="panel recent-reports report-library"><div class="panel-head"><div><h2>报告库</h2><p>{{ can('system:manage') ? '全部用户生成的持久化报告' : '由当前账户生成的持久化报告' }}</p></div><button class="outline-button" :disabled="reportLibraryLoading" @click="loadReportLibrary"><AppIcon name="refresh" :size="13" />刷新</button></div><p v-if="reportLibraryError" class="library-error">{{ reportLibraryError }}</p><div v-if="reportLibraryLoading && !reportLibrary.length" class="matrix-empty">正在读取报告库…</div><div v-else-if="!reportLibrary.length" class="matrix-empty">尚未生成报告，选择上方模板即可创建第一份报告。</div><div v-else class="table-wrap"><table><thead><tr><th>报告标题</th><th>创建人</th><th>状态</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in reportLibrary" :key="item.id"><td><strong>{{ item.title }}</strong><small class="report-id">#{{ item.id }}</small></td><td>{{ item.author }}</td><td><em class="status-tag" :class="item.status === 'published' ? '' : 'draft'">{{ reportStatusLabel(item.status) }}</em></td><td>{{ formatDateTime(item.created_at) }}</td><td>{{ formatDateTime(item.updated_at) }}</td><td><div class="library-actions"><button class="text-button" @click="openStoredReport(item.id)">查看</button><button v-if="can('system:manage')" class="text-button" @click="changeReportStatus(item)">{{ item.status === 'published' ? '撤回' : '发布' }}</button></div></td></tr></tbody></table></div></section>
+        </template>
+
+        <template v-else-if="activeView === 'public-reports'">
+          <PublicReports embedded />
+        </template>
+
+        <template v-else-if="activeView === 'account'">
+          <AccountSettings embedded />
         </template>
       </main>
     </section>
@@ -930,7 +1023,7 @@ onBeforeUnmount(() => {
 .cost-layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.75fr);gap:15px;align-items:start}
 .cost-form-panel{padding:21px 23px}.model-badge{padding:5px 8px;color:#277d75;background:#e7f5f2;border-radius:6px;font-size:9px;font-weight:700}
 .cost-form-section{margin-top:18px;padding-top:16px;border-top:1px solid #edf0f1}.cost-form-section:first-child{margin-top:8px;padding-top:0;border-top:0}.cost-form-section h3{margin-bottom:12px;color:#41535c;font-size:11px}
-.cost-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 13px}.cost-field-grid label{display:grid;gap:6px;color:#68767f;font-size:9px}.cost-field-grid label.wide{grid-column:span 2}
+.cost-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 13px}.cost-field-grid label{display:grid;align-content:start;gap:6px;color:#68767f;font-size:9px}.cost-field-grid label.wide{grid-column:span 2}.cost-field-grid label small{min-height:12px;color:#84929a;font-size:8px;line-height:12px}
 .cost-field-grid input,.cost-field-grid select{width:100%;height:37px;padding:0 10px;color:#33464f;background:#fafcfc;border:1px solid #dfe6e8;border-radius:7px;outline:0;font-size:10px;transition:.2s}.cost-field-grid input:focus,.cost-field-grid select:focus{border-color:#5aa79f;box-shadow:0 0 0 3px rgba(42,143,134,.09)}
 .cost-error{display:flex;align-items:center;gap:7px;margin-top:14px;padding:10px;color:#a65c4f;background:#fff2f0;border:1px solid #f0d1cc;border-radius:8px;font-size:9px}.cost-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
 .cost-result-column{display:grid;gap:13px;position:sticky;top:80px}.cost-result-card{padding:27px;color:#fff;background:linear-gradient(135deg,#164f4b,#19776f);border-radius:14px;box-shadow:0 14px 34px rgba(22,86,80,.16)}
@@ -964,4 +1057,28 @@ onBeforeUnmount(() => {
 @media(max-width:1180px){.decision-row{grid-template-columns:repeat(2,1fr)}.decision-row>:last-child{grid-column:span 2}.comparison-metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:800px){.decision-row{grid-template-columns:1fr}.decision-row>:last-child{grid-column:auto}.comparison-head,.comparison-controls{align-items:stretch;flex-direction:column}.comparison-controls label{min-width:0}.comparison-controls>span{align-self:center;margin:0}.comparison-controls .ai-action,.comparison-controls .compare-run{width:100%;margin-left:0}.comparison-metrics{grid-template-columns:1fr 1fr}.hospital-compare-grid{grid-template-columns:1fr}.hospital-trend,.hospital-case-mix{grid-column:auto}.hospital-mix-row{grid-template-columns:minmax(80px,1fr) 1fr 1fr}.case-mix-grid{grid-template-columns:1fr}.chart-modal-backdrop{padding:12px}.chart-modal-card{width:calc(100vw - 24px);max-height:calc(100vh - 24px);border-radius:13px}.chart-modal-card>header{padding:15px 16px 12px}.chart-modal-card>header h2{font-size:15px}.chart-modal-body{padding:8px 8px 0}.chart-modal-card>footer{padding:8px 16px 12px}.chart-modal-card>footer span{max-width:70%}.matrix-controls{width:100%;align-items:stretch;flex-wrap:wrap}.field-quality-panel .panel-head{flex-direction:column}.matrix-controls select{flex:1}.patient-filter-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:480px){.comparison-metrics{grid-template-columns:1fr}.comparison-tabs{width:100%}.comparison-tabs button{flex:1}.patient-filter-grid{grid-template-columns:1fr}}
+</style>
+
+<style>
+/* 医院对比详情使用非对称主次布局，卡片高度由内容决定。 */
+.hospital-compare-grid{grid-template-columns:1fr;gap:16px}
+.hospital-detail-mosaic{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.16fr) minmax(340px,.84fr);gap:16px;align-items:start}
+.hospital-detail-mosaic.single{grid-template-columns:1fr}
+.hospital-side-stack{display:grid;gap:16px;margin-top:24px}
+.hospital-detail-mosaic .hospital-mix-card{position:relative;min-width:0;overflow:hidden;padding:20px 21px 21px;background:#fff;border:1px solid #dfe7e5;border-radius:15px;box-shadow:0 8px 24px rgba(24,65,61,.045)}
+.hospital-detail-mosaic .hospital-mix-card::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:#279587}
+.hospital-detail-mosaic .severity-mix-card::before{background:#7598c7}
+.hospital-detail-mosaic .admission-mix-card::before{background:#d3a35d}
+.hospital-detail-mosaic .hospital-section-head{margin-bottom:16px}
+.hospital-detail-mosaic .hospital-section-head h3{font-size:14px}
+.hospital-detail-mosaic .hospital-section-head p{font-size:11px}
+.hospital-detail-mosaic .hospital-section-head>span{font-size:10px}
+.hospital-detail-mosaic .hospital-mix-table{gap:13px}
+.hospital-detail-mosaic .hospital-mix-row>strong{font-size:11px}
+.hospital-detail-mosaic .hospital-mix-row span{font-size:10px}
+.hospital-detail-mosaic .hospital-mix-row i{height:6px;background:#edf2f1}
+.hospital-detail-mosaic .severity-mix-card{background:#fbfcfe}
+.hospital-detail-mosaic .admission-mix-card{margin-right:26px;background:#fffdf9}
+.hospital-detail-mosaic .disease-mix-card{margin-left:8px}
+@media(max-width:1050px){.hospital-detail-mosaic{grid-template-columns:1fr}.hospital-side-stack{margin-top:0}.hospital-detail-mosaic .admission-mix-card{margin-right:0}.hospital-detail-mosaic .disease-mix-card{margin-left:0}}
 </style>

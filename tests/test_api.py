@@ -536,6 +536,46 @@ def test_patient_can_use_hospital_compare(monkeypatch):
     assert response.get_json()["data"]["role_scope"] == "patient"
 
 
+def test_future_cost_endpoint_is_available_to_patient(monkeypatch):
+    from app.ml import cost_model
+
+    client = authenticated_client(monkeypatch, "patient")
+    monkeypatch.setitem(__import__("app.service_layer.api.routes", fromlist=["FEATURES"]).FEATURES, "ml_analysis", True)
+    monkeypatch.setattr(cost_model, "predict_future_cost", lambda features, year, rate: {"forecast_year": year, "features": features, "rate": rate})
+    response = client.post(
+        "/api/v2/predictions/future-cost", json={"features": {"age_group": "50 to 69"}, "forecast_year": 2025},
+        headers={"X-CSRF-Token": "test-csrf"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["data"]["forecast_year"] == 2025
+
+
+def test_cost_prediction_options_are_available_to_patient(monkeypatch):
+    from app.ml import cost_model
+
+    client = authenticated_client(monkeypatch, "patient")
+    monkeypatch.setattr(cost_model, "cost_prediction_options", lambda: {"diagnosis": [{"code": "CIR019"}]})
+    response = client.get("/api/v2/predictions/cost-options")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["diagnosis"][0]["code"] == "CIR019"
+
+
+def test_budget_forecast_endpoint_rejects_patient_and_allows_doctor(monkeypatch):
+    patient = authenticated_client(monkeypatch, "patient")
+    response = patient.post("/api/v2/forecasts/annual-budget", json={}, headers={"X-CSRF-Token": "test-csrf"})
+    assert response.status_code == 403
+
+    from app.ml import cost_model
+    from app.service_layer.api import routes
+    monkeypatch.setitem(routes.FEATURES, "ml_analysis", True)
+    monkeypatch.setattr(cost_model, "forecast_annual_budget", lambda _payload: {"target_year": 2025})
+    doctor = authenticated_client(monkeypatch, "doctor")
+    response = doctor.post("/api/v2/forecasts/annual-budget", json={}, headers={"X-CSRF-Token": "test-csrf"})
+    assert response.status_code == 200
+    assert response.get_json()["data"]["target_year"] == 2025
+
+
 def test_login_starts_session_and_returns_permissions(client, monkeypatch):
     from app.auth import captcha
 
